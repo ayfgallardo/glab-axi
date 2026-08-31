@@ -464,7 +464,7 @@ const table: SuggestionEntry[] = [
     match: (c) => c.domain === "repo" && c.action === "view",
     lines: (c) => [
       `Run \`glab-axi${repoFlag(c)} issue list\` to see issues`,
-      `Run \`glab-axi${repoFlag(c)} pr list\` to see pull requests`,
+      `Run \`glab-axi${repoFlag(c)} mr list\` to see merge requests`,
     ],
   },
 

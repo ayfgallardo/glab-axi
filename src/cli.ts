@@ -9,6 +9,7 @@ import { issueCommand, ISSUE_HELP } from "./commands/issue.js";
 import { mrCommand, MR_HELP } from "./commands/mr.js";
 import { ciCommand, CI_HELP } from "./commands/ci.js";
 import { scheduleCommand, SCHEDULE_HELP } from "./commands/schedule.js";
+import { repoCommand, REPO_HELP } from "./commands/repo.js";
 
 export const DESCRIPTION =
   "Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.";
@@ -56,6 +57,7 @@ const COMMAND_HELP: Record<string, string> = {
   mr: MR_HELP,
   ci: CI_HELP,
   schedule: SCHEDULE_HELP,
+  repo: REPO_HELP,
 };
 
 type HostOnlyContext = { host: HostContext };
@@ -76,7 +78,7 @@ const COMMANDS: Record<string, WrappedCommandFn> = {
   snippet: withRepoContext(notPorted),
   label: withRepoContext(notPorted),
   release: withRepoContext(notPorted),
-  repo: withRepoContext(notPorted),
+  repo: withRepoContext(repoCommand),
   variable: withRepoContext(notPorted),
   stack: withLocalRepoContext(notPorted),
   api: withRepoContext(notPorted),

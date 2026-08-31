@@ -85,7 +85,7 @@ describe("CLI entrypoint", () => {
     mockedExecFileSync.mockReturnValue("git@gitlab.com:group/project.git\n");
     const output = createStdout();
 
-    await main({ argv: ["label", "list"], stdout: output.stdout });
+    await main({ argv: ["snippet", "list"], stdout: output.stdout });
 
     expect(output.read()).toContain("not ported yet");
     expect(mockedExecFile).not.toHaveBeenCalled();

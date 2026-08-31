@@ -1,242 +1,254 @@
-import { encode } from '@toon-format/toon';
-import type { RepoContext } from '../context.js';
-import { ghJson, ghExec } from '../gh.js';
-import { AxiError } from '../errors.js';
-import { getFlag, hasFlag, rejectUnknownFlags } from '../args.js';
+import { encode } from "@toon-format/toon";
+import type { RepoContext } from "../context.js";
+import { glabApiJson, glabExec } from "../glab.js";
+import { AxiError } from "../errors.js";
+import {
+  takeFlag,
+  takeBoolFlag,
+  rejectUnknownFlags,
+  resolveLimit,
+} from "../args.js";
+import { formatCountLine } from "../format.js";
+import { getSuggestions } from "../suggestions.js";
 import {
   field,
   lower,
-  pluck,
   relativeTime,
-  custom,
   renderList,
   renderDetail,
   renderHelp,
   renderOutput,
   renderError,
   type FieldDef,
-} from '../toon.js';
-import { formatCountLine } from '../format.js';
-import { getSuggestions } from '../suggestions.js';
+} from "../toon.js";
+
+interface GlabProject {
+  path_with_namespace: string;
+  description?: string | null;
+  default_branch?: string | null;
+  star_count?: number;
+  forks_count?: number;
+  open_issues_count?: number;
+  visibility?: string;
+  web_url?: string;
+  last_activity_at?: string;
+}
 
 const REPO_FLAGS: Record<string, readonly string[]> = {
   view: [],
-  create: [
-    '--public', '--private', '--internal', '--description', '--clone',
-    '--template',
-  ],
-  edit: [
-    '--description', '--visibility', '--default-branch', '--enable-issues',
-    '--enable-wiki',
-  ],
+  create: ["--public", "--private", "--internal", "--description", "--group"],
+  edit: ["--description", "--default-branch", "--archive", "--unarchive"],
   clone: [],
-  fork: ['--clone', '--remote'],
-  list: ['--limit', '--visibility', '--language', '--archived'],
+  fork: ["--clone", "--remote"],
+  list: ["--limit", "--visibility", "--archived"],
 };
 
-export const REPO_HELP = `usage: gh-axi repo <subcommand> [flags]
-subcommands[6]:
-  view [owner/name], create <name>, edit, clone <repo>, fork [repo], list [owner]
-flags{view}:
-  --repo <owner/name> or exactly one positional owner/name; choose one selector
+export const REPO_HELP = `usage: glab-axi repo <subcommand> [flags]
+subcommands[5]:
+  view, create <name>, edit, clone <repo> [dir], fork [repo], list
 flags{create}:
-  --public, --private, --internal, --description, --clone, --template
+  --public, --private, --internal, --description <text>, --group <namespace>
 flags{edit}:
-  --description, --visibility, --default-branch, --enable-issues, --enable-wiki
+  --description <text>, --default-branch <branch>, --archive, --unarchive
 flags{fork}:
   --clone, --remote
 flags{list}:
-  --limit <n> (default 30), --visibility, --language, --archived
+  --limit <n> (default 30), --visibility <public|internal|private>, --archived
 examples:
-  gh-axi repo view
-  gh-axi repo view --repo owner/name
-  gh-axi repo view owner/name
-  gh-axi repo create my-project --public --description "A new project"
-  gh-axi repo list --visibility public --language TypeScript`;
+  glab-axi repo view
+  glab-axi repo view -R group/subgroup/project
+  glab-axi repo create my-project --public --description "A new project"
+  glab-axi repo list --visibility public`;
 
 const viewSchema: FieldDef[] = [
-  field('name'),
-  field('description'),
-  pluck('defaultBranchRef', 'name', 'branch'),
-  field('stargazerCount', 'stars'),
-  field('forkCount', 'forks'),
-  custom('issues', (item) => (item.issues as Record<string, unknown> | undefined)?.totalCount ?? 0),
-  custom('prs', (item) => (item.pullRequests as Record<string, unknown> | undefined)?.totalCount ?? 0),
-  lower('visibility'),
-  pluck('primaryLanguage', 'name', 'language'),
+  field("path_with_namespace", "name"),
+  field("description"),
+  field("default_branch", "branch"),
+  field("star_count", "stars"),
+  field("forks_count", "forks"),
+  field("open_issues_count", "issues"),
+  lower("visibility"),
+  field("web_url", "url"),
 ];
 
 const listSchema: FieldDef[] = [
-  field('name'),
-  field('description'),
-  lower('visibility'),
-  pluck('primaryLanguage', 'name', 'language'),
-  field('stargazerCount', 'stars'),
-  relativeTime('updatedAt', 'updated'),
+  field("path_with_namespace", "name"),
+  field("description"),
+  lower("visibility"),
+  field("star_count", "stars"),
+  relativeTime("last_activity_at", "updated"),
 ];
 
-
-async function viewRepo(args: string[], ctx?: RepoContext): Promise<string> {
-  const positionals = args.filter((a) => !a.startsWith('-'));
-  const repoArg = positionals[1];
-  const extraArg = positionals[2];
-  if (repoArg && ctx?.source === 'flag') {
-    throw new AxiError(
-      `Unsupported positional argument for repo view with --repo: ${repoArg}. Use --repo <owner/name> to select a repository.`,
-      'VALIDATION_ERROR',
-    );
-  }
-  if (extraArg) {
-    throw new AxiError(
-      `Unsupported positional argument for repo view: ${extraArg}. Use --repo <owner/name> to select a repository.`,
-      'VALIDATION_ERROR',
-    );
-  }
-
-  const ghArgs = ['repo', 'view'];
-  // gh repo view accepts a positional repository; keep that parity only when
-  // it does not conflict with gh-axi's command-first --repo targeting.
-  if (repoArg) ghArgs.push(repoArg);
-  else if (ctx) ghArgs.push(ctx.nwo);
-  ghArgs.push('--json', 'name,description,defaultBranchRef,stargazerCount,forkCount,issues,pullRequests,visibility,primaryLanguage');
-  const repo = await ghJson<Record<string, unknown>>(ghArgs); // Don't pass ctx — we handle repo arg ourselves
-
-  return renderOutput([
-    renderDetail('repo', repo, viewSchema),
-  ]);
+async function viewRepo(_args: string[], ctx?: RepoContext): Promise<string> {
+  const repo = await glabApiJson<GlabProject>("projects/:id", { ctx });
+  return renderOutput([renderDetail("repo", repo, viewSchema)]);
 }
 
 async function createRepo(args: string[], ctx?: RepoContext): Promise<string> {
-  const positionals = args.filter((a) => !a.startsWith('--'));
-  const name = positionals[1];
-  if (!name) throw new AxiError('Repository name is required: gh-axi repo create <name>', 'VALIDATION_ERROR');
+  const positionals = args.filter((a) => !a.startsWith("-"));
+  const name = positionals[0];
+  if (!name) {
+    throw new AxiError(
+      "Repository name is required: glab-axi repo create <name>",
+      "VALIDATION_ERROR",
+    );
+  }
 
-  const ghArgs = ['repo', 'create', name];
-  if (hasFlag(args, '--public')) ghArgs.push('--public');
-  else if (hasFlag(args, '--private')) ghArgs.push('--private');
-  else if (hasFlag(args, '--internal')) ghArgs.push('--internal');
-  const description = getFlag(args, '--description');
-  if (description) ghArgs.push('--description', description);
-  if (hasFlag(args, '--clone')) ghArgs.push('--clone');
-  const template = getFlag(args, '--template');
-  if (template) ghArgs.push('--template', template);
+  const glabArgs = ["repo", "create", name];
+  if (takeBoolFlag(args, "--public")) glabArgs.push("--public");
+  else if (takeBoolFlag(args, "--private")) glabArgs.push("--private");
+  else if (takeBoolFlag(args, "--internal")) glabArgs.push("--internal");
+  const description = takeFlag(args, "--description");
+  if (description) glabArgs.push("--description", description);
+  const group = takeFlag(args, "--group");
+  if (group) glabArgs.push("--group", group);
 
-  await ghExec(ghArgs);
-  const suggestions = getSuggestions({ domain: 'repo', action: 'create', repo: ctx });
+  await glabExec(glabArgs);
+  const suggestions = getSuggestions({
+    domain: "repo",
+    action: "create",
+    repo: ctx,
+  });
   return renderOutput([
-    encode({ created: 'ok', repo: name }),
+    encode({ created: "ok", repo: name }),
     renderHelp(suggestions),
   ]);
 }
 
 async function editRepo(args: string[], ctx?: RepoContext): Promise<string> {
-  const ghArgs = ['repo', 'edit'];
-  if (ctx && ctx.source !== 'git') ghArgs.push(ctx.nwo);
-  const description = getFlag(args, '--description');
-  if (description) ghArgs.push('--description', description);
-  const visibility = getFlag(args, '--visibility');
-  if (visibility) ghArgs.push('--visibility', visibility);
-  const defaultBranch = getFlag(args, '--default-branch');
-  if (defaultBranch) ghArgs.push('--default-branch', defaultBranch);
-  const enableIssues = getFlag(args, '--enable-issues');
-  if (enableIssues) ghArgs.push('--enable-issues=' + enableIssues);
-  const enableWiki = getFlag(args, '--enable-wiki');
-  if (enableWiki) ghArgs.push('--enable-wiki=' + enableWiki);
+  const glabArgs = ["repo", "update"];
+  if (ctx && ctx.source !== "git") glabArgs.push(ctx.fullPath);
+  const description = takeFlag(args, "--description");
+  if (description) glabArgs.push("--description", description);
+  const defaultBranch = takeFlag(args, "--default-branch");
+  if (defaultBranch) glabArgs.push("--defaultBranch", defaultBranch);
+  const archive = takeBoolFlag(args, "--archive");
+  const unarchive = takeBoolFlag(args, "--unarchive");
+  if (archive && unarchive) {
+    throw new AxiError(
+      "Choose either --archive or --unarchive, not both",
+      "VALIDATION_ERROR",
+    );
+  }
+  if (archive) glabArgs.push("--archive");
+  if (unarchive) glabArgs.push("--archive=false");
 
-  await ghExec(ghArgs); // Don't pass ctx — we handle repo arg ourselves
-  const suggestions = getSuggestions({ domain: 'repo', action: 'edit', repo: ctx });
-  return renderOutput([
-    encode({ edit: 'ok' }),
-    renderHelp(suggestions),
-  ]);
+  await glabExec(glabArgs);
+  const suggestions = getSuggestions({
+    domain: "repo",
+    action: "edit",
+    repo: ctx,
+  });
+  return renderOutput([encode({ edit: "ok" }), renderHelp(suggestions)]);
 }
 
 async function cloneRepo(args: string[]): Promise<string> {
-  const positionals = args.filter((a) => !a.startsWith('--'));
-  const repo = positionals[1];
-  if (!repo) throw new AxiError('Repository is required: gh-axi repo clone <repo>', 'VALIDATION_ERROR');
+  const positionals = args.filter((a) => !a.startsWith("-"));
+  const repo = positionals[0];
+  if (!repo) {
+    throw new AxiError(
+      "Repository is required: glab-axi repo clone <repo>",
+      "VALIDATION_ERROR",
+    );
+  }
+  const dir = positionals[1];
 
-  await ghExec(['repo', 'clone', repo]);
-  const suggestions = getSuggestions({ domain: 'repo', action: 'clone' });
-  return renderOutput([
-    encode({ clone: 'ok', repo }),
-    renderHelp(suggestions),
-  ]);
+  const glabArgs = ["repo", "clone", repo];
+  if (dir) glabArgs.push(dir);
+  await glabExec(glabArgs);
+  const suggestions = getSuggestions({ domain: "repo", action: "clone" });
+  return renderOutput([encode({ clone: "ok", repo }), renderHelp(suggestions)]);
 }
 
 async function forkRepo(args: string[], ctx?: RepoContext): Promise<string> {
-  const positionals = args.filter((a) => !a.startsWith('--'));
-  const repo = positionals[1]; // optional
+  const positionals = args.filter((a) => !a.startsWith("-"));
+  const repo = positionals[0] ?? ctx?.fullPath;
+  if (!repo) {
+    throw new AxiError(
+      "Repository is required: glab-axi repo fork <repo>",
+      "VALIDATION_ERROR",
+    );
+  }
 
-  const ghArgs = ['repo', 'fork'];
-  if (repo) ghArgs.push(repo);
-  if (hasFlag(args, '--clone')) ghArgs.push('--clone');
-  if (hasFlag(args, '--remote')) ghArgs.push('--remote');
+  const glabArgs = ["repo", "fork", repo];
+  if (takeBoolFlag(args, "--clone")) glabArgs.push("--clone");
+  if (takeBoolFlag(args, "--remote")) glabArgs.push("--remote");
 
-  await ghExec(ghArgs, ctx);
-  const suggestions = getSuggestions({ domain: 'repo', action: 'fork', repo: ctx });
-  return renderOutput([
-    encode({ fork: 'ok', repo: repo ?? ctx?.nwo ?? 'current' }),
-    renderHelp(suggestions),
-  ]);
+  await glabExec(glabArgs);
+  const suggestions = getSuggestions({
+    domain: "repo",
+    action: "fork",
+    repo: ctx,
+  });
+  return renderOutput([encode({ fork: "ok", repo }), renderHelp(suggestions)]);
 }
 
 async function listRepos(args: string[], ctx?: RepoContext): Promise<string> {
-  const positionals = args.filter((a) => !a.startsWith('--'));
-  const owner = positionals[1]; // optional
+  const limit = resolveLimit(args, 30);
+  const visibility = takeFlag(args, "--visibility");
+  const archived = takeBoolFlag(args, "--archived");
 
-  const limit = getFlag(args, '--limit') ?? '30';
-  const ghArgs = [
-    'repo', 'list',
-    '--json', 'name,description,visibility,primaryLanguage,stargazerCount,updatedAt',
-    '--limit', limit,
-  ];
-  if (owner) ghArgs.splice(2, 0, owner); // insert owner after 'list'
-  const visibility = getFlag(args, '--visibility');
-  if (visibility) ghArgs.push('--visibility', visibility);
-  const language = getFlag(args, '--language');
-  if (language) ghArgs.push('--language', language);
-  if (hasFlag(args, '--archived')) ghArgs.push('--archived');
+  const query = new URLSearchParams({
+    membership: "true",
+    order_by: "last_activity_at",
+    sort: "desc",
+    per_page: String(limit),
+  });
+  if (visibility) query.set("visibility", visibility);
+  if (archived) query.set("archived", "true");
 
-  const repos = await ghJson<Record<string, unknown>[]>(ghArgs);
+  const repos = await glabApiJson<GlabProject[]>(
+    `projects?${query.toString()}`,
+    {
+      ctx,
+    },
+  );
   const isEmpty = repos.length === 0;
-  const limitNum = Number(limit);
-  const countLine = formatCountLine({ count: repos.length, limit: limitNum });
-  const suggestions = getSuggestions({ domain: 'repo', action: 'list', isEmpty, repo: ctx });
+  const countLine = formatCountLine({ count: repos.length, limit });
+  const suggestions = getSuggestions({
+    domain: "repo",
+    action: "list",
+    isEmpty,
+    repo: ctx,
+  });
   return renderOutput([
     countLine,
-    renderList('repos', repos, listSchema),
+    renderList("repos", repos, listSchema),
     renderHelp(suggestions),
   ]);
 }
 
-export async function repoCommand(args: string[], ctx?: RepoContext): Promise<string> {
+export async function repoCommand(
+  args: string[],
+  ctx?: RepoContext,
+): Promise<string> {
   const sub = args[0];
 
-  if (sub === '--help' || sub === undefined) return REPO_HELP;
+  if (sub === "--help" || sub === undefined) return REPO_HELP;
 
+  const rest = args.slice(1);
   switch (sub) {
-    case 'view':
-      rejectUnknownFlags(args.slice(1), REPO_FLAGS.view, 'repo', 'view');
-      return viewRepo(args, ctx);
-    case 'create':
-      rejectUnknownFlags(args.slice(1), REPO_FLAGS.create, 'repo', 'create');
-      return createRepo(args, ctx);
-    case 'edit':
-      rejectUnknownFlags(args.slice(1), REPO_FLAGS.edit, 'repo', 'edit');
-      return editRepo(args, ctx);
-    case 'clone':
-      rejectUnknownFlags(args.slice(1), REPO_FLAGS.clone, 'repo', 'clone');
-      return cloneRepo(args);
-    case 'fork':
-      rejectUnknownFlags(args.slice(1), REPO_FLAGS.fork, 'repo', 'fork');
-      return forkRepo(args, ctx);
-    case 'list':
-      rejectUnknownFlags(args.slice(1), REPO_FLAGS.list, 'repo', 'list');
-      return listRepos(args, ctx);
+    case "view":
+      rejectUnknownFlags(rest, REPO_FLAGS.view, "repo", "view");
+      return viewRepo(rest, ctx);
+    case "create":
+      rejectUnknownFlags(rest, REPO_FLAGS.create, "repo", "create");
+      return createRepo(rest, ctx);
+    case "edit":
+      rejectUnknownFlags(rest, REPO_FLAGS.edit, "repo", "edit");
+      return editRepo(rest, ctx);
+    case "clone":
+      rejectUnknownFlags(rest, REPO_FLAGS.clone, "repo", "clone");
+      return cloneRepo(rest);
+    case "fork":
+      rejectUnknownFlags(rest, REPO_FLAGS.fork, "repo", "fork");
+      return forkRepo(rest, ctx);
+    case "list":
+      rejectUnknownFlags(rest, REPO_FLAGS.list, "repo", "list");
+      return listRepos(rest, ctx);
     default:
-      return renderError(`Unknown subcommand: ${sub}`, 'VALIDATION_ERROR', [
-        'Available subcommands: view, create, edit, clone, fork, list',
+      return renderError(`Unknown subcommand: ${sub}`, "VALIDATION_ERROR", [
+        "Available subcommands: view, create, edit, clone, fork, list",
       ]);
   }
 }
