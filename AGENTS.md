@@ -4,6 +4,32 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Add durable project-specific notes here as they are discovered through real work.
 
+## Port status: gh-axi → glab-axi
+
+This repository is a port of gh-axi 0.1.35 (a `gh` wrapper) to `glab`. The core layer is ported; the command families are not yet.
+
+Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `bin/glab-axi.ts`.
+Not yet ported: everything under `src/commands/` plus `src/totals.ts`, `src/gistSelector.ts` and the gh content of `src/suggestions.ts`. `cli.ts` imports none of them — every command family routes to an inline stub that throws `not ported yet`.
+
+The unported gh modules are held out of the graph so build and test stay green: `tsconfig.json` excludes `src/commands` and `src/totals.ts`, and `vitest.config.ts` carries a commented `NOT_PORTED_YET` list naming the lot that reclaims each suite. **Each port lot removes its own entry from both lists** — `describe.skip` is not an option, because a suite whose import fails errors before the skip is evaluated.
+
+Sections below tagged **[gh-era]** describe the unported modules and still say `gh`, `ghJson`, `nwo`, `GH_HOST`. Treat them as a description of the source material to port, never as a description of current behavior.
+
+## glab invocation core (`src/glab.ts`, `src/context.ts`, `src/errors.ts`)
+
+Command modules talk to glab through `src/glab.ts` only: `glabJson`, `glabExec`, `glabRaw`, `glabExecWithStdin`, `glabApiJson`. All go through `execFile("glab", …)` — never a shell.
+
+`RepoContext` is `{ fullPath, source, host? }`. GitLab namespaces nest, so there is no owner/name pair and no `nwo`: `group/subgroup/project` is one `fullPath`. `buildArgs` appends **`-R <fullPath>`** (not `--repo`) when `source !== "git"`, letting glab auto-detect the git remote otherwise.
+
+`glab api` accepts no `-R` at all. The project travels inside the path as the URL-encoded `:id`, and glab only resolves that placeholder from the current checkout — so `glabApiJson` substitutes it itself from the context (`encodedProjectId` in `context.ts`) and never appends `-R`. Its `fields` are split by JS type: strings go to `--raw-field`, booleans and numbers to `--field`, because glab's `--field` does magic type conversion that would turn a title of `"42"` into an integer.
+
+GitLab speaks `iid` (per-project visible number) for issues and MRs. The global `id` must never surface in the UX.
+
+`mapGlabError` walks `patterns` in order and returns on the first hit, so **order is the contract**: a narrow pattern must sit ahead of any broader one that would swallow it. Two glab-specific traps, both verified against glab 1.97:
+
+- glab does not print a bare error line. It renders a **box** on stderr — blank line, `ERROR` banner, blank line, then the space-padded message — and prefixes `glab: ` on API failures. `cleanLines()` strips all of that; patterns and reported messages run on the cleaned text, otherwise the reported message is literally `ERROR`.
+- HTTP statuses must be matched only where glab prints one — line start, its `(HTTP 404)` suffix, or after the `: ` that follows the request URL. Use the `httpStatus()` helper. A floating `\b404\b` also matches a resource id inside the URL, so any failure on issue/MR iid 400/401/403/404/429 gets misclassified.
+
 ## Dependency bumps and the lockfile
 
 The committed `pnpm-lock.yaml` is Prettier-formatted (multi-line `resolution:` and `engines:` blocks), which is not pnpm's native output format.
@@ -13,8 +39,8 @@ CI uses `pnpm install --frozen-lockfile`, which parses the YAML structurally and
 
 ## The SDK-provided `update` command
 
-`gh-axi` runs its CLI through `runAxiCli` from `axi-sdk-js` (`src/cli.ts`) and registers no `update` command of its own.
-Since `axi-sdk-js@0.1.8` ships `update` as a `RESERVED_COMMANDS` built-in, `gh-axi` inherits `gh-axi update` for free, and the SDK auto-resolves the npm package name (`gh-axi`) by walking up to the nearest `package.json`.
+`glab-axi` runs its CLI through `runAxiCli` from `axi-sdk-js` (`src/cli.ts`) and registers no `update` command of its own.
+Since `axi-sdk-js@0.1.8` ships `update` as a `RESERVED_COMMANDS` built-in, `glab-axi` inherits `glab-axi update` for free, and the SDK auto-resolves the npm package name (`glab-axi`) by walking up to the nearest `package.json`.
 The SDK also appends a `"built-in":` section to the top-level `--help` output at runtime, so `src/cli.ts`'s `TOP_HELP` constant is a prefix of the rendered help rather than the whole thing.
 
 ## Release process
@@ -26,16 +52,20 @@ Every `pull_request` workflow (`ci.yml`, `guard-generated-files.yml`, `no-mistak
 
 ## Installable skill (`src/skill.ts` → `skills/gh-axi/SKILL.md`)
 
+**[gh-era]** Source material for a later port lot, not current behavior.
+
 The shipped skill stays a minimal stub and defers to the CLI for all actual guidance. gh-axi CLI output (`gh-axi` dashboard, `gh-axi --help`, `gh-axi <command> --help`) is the single source of truth. Never re-duplicate CLI-owned instructions into the skill; prefer a pointer over restated detail.
 
-## GitHub Enterprise host support (`src/host.ts`, `src/cli.ts`)
+## Self-managed host support (`src/host.ts`, `src/cli.ts`)
 
-`gh-axi` targets a custom GitHub host (e.g. a GHE server like `ghe.example.com`) via a global `--hostname <host>` flag or the `GH_HOST` env var; explicit `--hostname` wins.
-Like `-R`/`--repo`, `--hostname` must come _after_ the command (the SDK rejects leading flags), and it is stripped from the args before they reach the underlying `gh` (it is never a subcommand flag).
-`src/cli.ts`'s `resolveContext` sets `process.env.GH_HOST` only when `--hostname` is present; the child `gh` process inherits `process.env`, so no explicit env is threaded through `gh.ts`. When no `--hostname` is given, `GH_HOST` is left untouched, keeping the default (github.com) behavior byte-for-byte identical.
-`src/host.ts#resolveHost()` (flag > `GH_HOST` > `github.com`) is the single source of truth for the effective host used when _building or parsing_ URLs — `parseRemoteUrl` in `src/context.ts` matches the configured host in `git remote` URLs, and `issue transfer`'s fallback URL is built as `https://<host>/...`. The `gh pr create` output regex (`/pull/(\d+)/`) is already host-agnostic.
+`glab-axi` targets a self-managed GitLab instance via a global `--hostname <host>` flag or the `GITLAB_HOST` env var; explicit `--hostname` wins.
+Like `-R`/`--repo`, `--hostname` must come _after_ the command (the SDK rejects leading flags), and it is stripped from the args before they reach the underlying `glab` (it is never a subcommand flag).
+`src/cli.ts`'s `resolveContext` sets `process.env.GITLAB_HOST` only when `--hostname` is present, and `glab.ts#execOptions` also puts it in the child env when the context carries a host, so `glab.ts` is usable without going through the CLI. When no `--hostname` is given, `GITLAB_HOST` is left untouched.
+`src/host.ts#resolveHost()` (flag > `GITLAB_HOST` > `gitlab.com`) is the single source of truth for the effective host used when _building or parsing_ URLs — `parseRemoteUrl` in `src/context.ts` matches it in `git remote` URLs, over a single regex that accepts both SSH and HTTPS forms and any depth of nested group.
 
 ## Secret/variable value input (`src/secretValue.ts`, `src/stdin.ts`, `gh.ts#ghExecWithStdin`)
+
+**[gh-era]** Source material for a later port lot, not current behavior.
 
 `gh secret list`/`gh variable list` do not support `--limit` or any pagination flag (unlike `issue`/`pr`/`release` list), so `secret.ts`/`variable.ts` list all results in one call with no `--limit` flag of their own.
 
@@ -49,6 +79,8 @@ Variable values are not treated as secrets: `variableCommand`'s `set` subcommand
 
 ## User-scoped commands (`src/commands/gist.ts`, `src/commands/project.ts`)
 
+**[gh-era]** Source material for a later port lot, not current behavior.
+
 Some GitHub API endpoints are user-scoped rather than repo-scoped: `gh api /gists` and `gh project` have no `--repo` flag and reject it if supplied.
 `gh.ts#buildArgs` auto-appends `--repo <nwo>` for any `RepoContext` whose `source !== "git"`, so passing ctx to `ghJson` from these handlers would inject a flag the CLI rejects.
 The fix is structural: these command functions omit the `ctx` parameter entirely (TypeScript accepts `(args: string[])` as `CommandFn` because fewer params are always assignable).
@@ -56,6 +88,8 @@ The fix is structural: these command functions omit the `ctx` parameter entirely
 `gist.ts` follows this pattern; `project.ts` does too (though it additionally uses ctx?.owner for owner defaulting, it never forwards ctx to `ghJson`).
 
 ## GitHub Projects (`gh project`) support (`src/commands/project.ts`)
+
+**[gh-era]** Source material for a later port lot, not current behavior.
 
 Unlike every other command family, `gh project` is owner-scoped (`--owner <login>`), not repo-scoped — it has no `--repo` flag at all.
 `project.ts`'s subfunctions therefore never pass `RepoContext` as the second arg to `ghJson` (matching `search.ts`'s existing pattern) — see "User-scoped commands" above for why.
@@ -66,25 +100,23 @@ Requires the `project` (or `read:project`) OAuth scope on the `gh` token; `src/e
 
 ## Repeatable flags (`src/args.ts`)
 
+**[gh-era]** Source material for a later port lot, not current behavior.
+
 `gh` accepts `--label`, `--assignee`, `--reviewer`, `--project`, and the `--add-*`/`--remove-*` variants once per value, so gh-axi must collect _every_ occurrence.
 Use `getAllFlags`/`takeAllFlags` plus `pushRepeated`; `getFlag`/`takeFlag` keep only the first occurrence and silently discard the rest, which is the bug that recurred as #55, #57, and #75.
 Both collectors reject a dangling (`--label` with nothing after it) or blank (`--label=`) value with a `VALIDATION_ERROR` instead of dropping it.
 Pick the collector that matches the surrounding file: `issue.ts` reads args non-destructively (`getAllFlags`), `pr.ts` consumes them (`takeAllFlags`).
 When a flag becomes repeatable, mark it `(repeatable)` in that command's `*_HELP` string.
 
-## gh stderr classification (`src/errors.ts`)
+## `--version` fast path (`bin/glab-axi.ts`, `src/version.ts`)
 
-`mapGhError` walks `patterns` in order and returns on the first regex hit, so **order is the contract**: a narrow, specific pattern must sit ahead of any broader one it would otherwise be swallowed by.
-gh sometimes embeds remediation hints in errors with a different root cause, so check new patterns against real stderr and place specific carriers of a generic hint first rather than narrowing the generic match.
-`test/errors.test.ts` pins the repo-resolution and genuine-auth cases.
-
-## `--version` fast path (`bin/gh-axi.ts`, `src/version.ts`)
-
-`bin/gh-axi.ts` answers a bare `-v`/`-V`/`--version` via `tryFastPath` from `axi-sdk-js/fast-path` (a dependency-free SDK subpath) and only `await import("../src/cli.js")` otherwise, so the version path never loads the command graph (~31ms -> ~20ms, the node floor).
+`bin/glab-axi.ts` answers a bare `-v`/`-V`/`--version` via `tryFastPath` from `axi-sdk-js/fast-path` (a dependency-free SDK subpath) and only `await import("../src/cli.js")` otherwise, so the version path never loads the command graph (~31ms -> ~20ms, the node floor).
 This only works because `src/version.ts` is a LEAF module importing node builtins only - `cli.ts` imports `VERSION` from it, never the reverse. Adding any non-builtin import to `src/version.ts` silently undoes the speedup.
-`test/version-fast-path.test.ts` guards it deterministically with a `module.register()` load-hook trace (`test/fixtures/module-trace-*.mjs`) plus a negative control on `--help`. Do not add a wall-clock timing assertion; it was proven flaky under CI contention.
+`test/version-fast-path.test.ts` guards it deterministically with a `module.register()` load-hook trace (`test/fixtures/module-trace-*.mjs`) plus a negative control on `--help` (which probes `src/suggestions.js`, the heaviest module `cli.ts` still pulls in). Do not add a wall-clock timing assertion; it was proven flaky under CI contention.
 
 ## Stacked PR support (`src/commands/stack.ts`)
+
+**[gh-era]** Source material for a later port lot, not current behavior.
 
 `gh-axi stack` is deliberately a strict adapter over the official `github/gh-stack` extension, not a second stack engine. Keep local metadata, Git mutation, rebase recovery, and Stacks API behavior upstream.
 Stack commands are cwd-bound. `cli.ts#withLocalRepoContext` rejects explicit repo flags and `GH_REPO`, strips the supported host flag, and never passes a `RepoContext` to `ghRaw`, because the extension does not accept `--repo`.
