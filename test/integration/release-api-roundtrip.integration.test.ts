@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const cli = join(repoRoot, "bin", "gh-axi.ts");
+const cli = join(repoRoot, "bin", "glab-axi.ts");
 const fakeGh = fileURLToPath(
   new URL("../fixtures/stateful-gh.mjs", import.meta.url),
 );
