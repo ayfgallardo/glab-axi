@@ -13,7 +13,7 @@ export const STACK_HELP = `usage: glab-axi stack <subcommand> [args] [flags]
 subcommands[9]:
   create <name>, save [file...], amend [file...], sync, list, switch <name>, next, prev, first, last
 flags{save,amend}:
-  -m/-d <text> (required — a message is mandatory so glab never opens $EDITOR), -a/--all (stage tracked+untracked files)
+  -m/-d <text> (required — a message is mandatory so glab never opens $EDITOR), -a/--all (stage tracked files only: modified+deleted)
 flags{sync}:
   --no-verify, --update-base, --assignee <user> (repeatable), --label <name> (repeatable), --reviewer <user> (repeatable)
 notes:

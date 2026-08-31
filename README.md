@@ -34,7 +34,7 @@ Run `glab-axi --help` for the full command list and `glab-axi <command> --help` 
 - `label` — manage project labels.
 - `release` — manage releases and their assets.
 - `repo` — repository-level operations (view, clone, archive, etc.).
-- `variable` — manage CI/CD variables (project and instance scope).
+- `variable` — manage CI/CD variables (project scope; `--scope` sets GitLab's environment_scope).
 - `stack` — thin adapter over stacked-diff style workflows.
 - `api` — call the GitLab REST API directly, with the same AXI conventions.
 - `setup` — install shell hooks and other one-time setup steps.

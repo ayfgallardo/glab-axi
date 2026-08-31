@@ -38,7 +38,8 @@ interface GlabTodo {
   project?: GlabTodoProject;
 }
 
-export const HOME_HELP = "";
+export const HOME_HELP =
+  "-R/--repo is ignored: the dashboard is account-scoped, not project-scoped.";
 
 const mrSchema: FieldDef[] = [
   field("iid"),
