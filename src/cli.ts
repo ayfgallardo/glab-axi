@@ -12,6 +12,7 @@ import { scheduleCommand, SCHEDULE_HELP } from "./commands/schedule.js";
 import { repoCommand, REPO_HELP } from "./commands/repo.js";
 import { labelCommand, LABEL_HELP } from "./commands/label.js";
 import { releaseCommand, RELEASE_HELP } from "./commands/release.js";
+import { variableCommand, VARIABLE_HELP } from "./commands/variable.js";
 
 export const DESCRIPTION =
   "Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.";
@@ -62,6 +63,7 @@ const COMMAND_HELP: Record<string, string> = {
   repo: REPO_HELP,
   label: LABEL_HELP,
   release: RELEASE_HELP,
+  variable: VARIABLE_HELP,
 };
 
 type HostOnlyContext = { host: HostContext };
@@ -83,7 +85,7 @@ const COMMANDS: Record<string, WrappedCommandFn> = {
   label: withRepoContext(labelCommand),
   release: withRepoContext(releaseCommand),
   repo: withRepoContext(repoCommand),
-  variable: withRepoContext(notPorted),
+  variable: withRepoContext(variableCommand),
   stack: withLocalRepoContext(notPorted),
   api: withRepoContext(notPorted),
   setup: notPorted,

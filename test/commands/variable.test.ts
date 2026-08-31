@@ -1,115 +1,174 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 
-vi.mock("../../src/gh.js", () => ({
-  ghJson: vi.fn(),
-  ghExec: vi.fn(),
-  ghExecWithStdin: vi.fn(),
+vi.mock("../../src/glab.js", () => ({
+  glabApiJson: vi.fn(),
+  glabExec: vi.fn(),
+  glabExecWithStdin: vi.fn(),
 }));
 
-vi.mock("../../src/secretValue.js", () => ({
-  resolveValue: vi.fn(),
+vi.mock("../../src/stdin.js", () => ({
+  readStdin: vi.fn(),
+  isStdinTTY: vi.fn(),
 }));
 
-import { ghJson, ghExec, ghExecWithStdin } from "../../src/gh.js";
-import { resolveValue } from "../../src/secretValue.js";
+import { glabApiJson, glabExec, glabExecWithStdin } from "../../src/glab.js";
+import { readStdin, isStdinTTY } from "../../src/stdin.js";
 import { variableCommand, VARIABLE_HELP } from "../../src/commands/variable.js";
-import { AxiError } from "../../src/errors.js";
+import type { RepoContext } from "../../src/context.js";
 
-const mockedGhJson = vi.mocked(ghJson);
-const mockedGhExec = vi.mocked(ghExec);
-const mockedGhExecWithStdin = vi.mocked(ghExecWithStdin);
-const mockedResolveValue = vi.mocked(resolveValue);
+const mockedApi = vi.mocked(glabApiJson);
+const mockedExec = vi.mocked(glabExec);
+const mockedExecStdin = vi.mocked(glabExecWithStdin);
+const mockedReadStdin = vi.mocked(readStdin);
+const mockedIsStdinTTY = vi.mocked(isStdinTTY);
+
+const ctx: RepoContext = { fullPath: "group/sub/project", source: "flag" };
+
+function apiPathsOf(): string[] {
+  return mockedApi.mock.calls.map((call) => call[0] as string);
+}
+
+function execArgsOf(index = 0): string[] {
+  return mockedExec.mock.calls[index][0] as string[];
+}
+
+function stdinCallOf(index = 0) {
+  const call = mockedExecStdin.mock.calls[index];
+  return { args: call[0] as string[], input: call[1] as string };
+}
+
+function variablePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    key: "NODE_ENV",
+    value: "production",
+    masked: false,
+    protected: false,
+    environment_scope: "*",
+    ...overrides,
+  };
+}
 
 describe("variableCommand", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockedIsStdinTTY.mockReturnValue(false);
+    mockedReadStdin.mockResolvedValue("production");
   });
 
   describe("router", () => {
     it("returns help when --help is passed", async () => {
-      const result = await variableCommand(["--help"]);
-      expect(result).toBe(VARIABLE_HELP);
+      expect(await variableCommand(["--help"])).toBe(VARIABLE_HELP);
     });
 
     it("returns help when no subcommand is given", async () => {
-      const result = await variableCommand([]);
-      expect(result).toBe(VARIABLE_HELP);
+      expect(await variableCommand([])).toBe(VARIABLE_HELP);
     });
 
     it("returns error for unknown subcommand", async () => {
       const result = await variableCommand(["unknown"]);
       expect(result).toContain("Unknown subcommand: unknown");
     });
+
+    it("rejects an unknown flag before calling glab", async () => {
+      await expect(
+        variableCommand(["set", "NAME", "--body", "value"], ctx),
+      ).rejects.toThrow(/unknown flag for glab-axi variable set: --body/);
+      expect(mockedApi).not.toHaveBeenCalled();
+      expect(mockedExecStdin).not.toHaveBeenCalled();
+    });
   });
 
   describe("list", () => {
-    it("returns variable names and values", async () => {
-      mockedGhJson.mockResolvedValue([
-        {
-          name: "NODE_ENV",
-          value: "production",
-          updatedAt: "2024-01-01T00:00:00Z",
-        },
-      ]);
+    it("reads projects/:id/variables and prints values", async () => {
+      mockedApi.mockResolvedValueOnce([variablePayload()]);
 
-      const result = await variableCommand(["list"]);
+      const result = await variableCommand(["list"], ctx);
 
+      expect(apiPathsOf()).toEqual(["projects/:id/variables?per_page=100"]);
       expect(result).toContain("NODE_ENV");
       expect(result).toContain("production");
-      expect(result).toContain("count: 1");
-      expect(mockedGhJson).toHaveBeenCalledWith(
-        ["variable", "list", "--json", "name,value,updatedAt"],
-        undefined,
+    });
+  });
+
+  describe("get", () => {
+    it("requires a name", async () => {
+      await expect(variableCommand(["get"], ctx)).rejects.toThrow(
+        "Variable name is required",
       );
+    });
+
+    it("fetches a single variable, applying --scope as a filter query", async () => {
+      mockedApi.mockResolvedValueOnce(variablePayload());
+
+      await variableCommand(["get", "NODE_ENV", "--scope", "production"], ctx);
+
+      expect(apiPathsOf()).toEqual([
+        "projects/:id/variables/NODE_ENV?filter%5Benvironment_scope%5D=production",
+      ]);
     });
   });
 
   describe("set", () => {
-    it("sets a variable from a resolved value and writes it via stdin", async () => {
-      mockedResolveValue.mockResolvedValue("production");
-      mockedGhExecWithStdin.mockResolvedValue("");
-
-      const result = await variableCommand([
-        "set",
-        "NODE_ENV",
-        "--body",
-        "production",
-      ]);
-
-      expect(result).toContain("set");
-      expect(result).toContain("ok");
-      expect(result).toContain("NODE_ENV");
-      expect(mockedResolveValue).toHaveBeenCalledWith("production", "variable");
-      expect(mockedGhExecWithStdin).toHaveBeenCalledWith(
-        ["variable", "set", "NODE_ENV"],
-        "production",
-        undefined,
+    it("requires a name", async () => {
+      await expect(variableCommand(["set"], ctx)).rejects.toThrow(
+        "Variable name is required",
       );
     });
 
-    it("throws when variable name is missing", async () => {
-      await expect(variableCommand(["set"])).rejects.toThrow(AxiError);
-      expect(mockedResolveValue).not.toHaveBeenCalled();
+    it("never puts the value in argv: it is piped to glab variable set via stdin", async () => {
+      const result = await variableCommand(
+        ["set", "NODE_ENV", "--masked", "--protected", "--scope", "prod"],
+        ctx,
+      );
+
+      const { args, input } = stdinCallOf();
+      expect(args).toEqual([
+        "variable",
+        "set",
+        "NODE_ENV",
+        "--masked",
+        "--protected",
+        "--scope",
+        "prod",
+      ]);
+      expect(args.join(" ")).not.toContain("production");
+      expect(input).toBe("production");
+      expect(result).toContain("set: ok");
+    });
+
+    it("throws when stdin is an interactive TTY", async () => {
+      mockedIsStdinTTY.mockReturnValue(true);
+
+      await expect(variableCommand(["set", "NODE_ENV"], ctx)).rejects.toThrow(
+        "variable value is required",
+      );
+      expect(mockedExecStdin).not.toHaveBeenCalled();
     });
   });
 
   describe("delete", () => {
-    it("deletes a variable by name", async () => {
-      mockedGhExec.mockResolvedValue("");
-
-      const result = await variableCommand(["delete", "NODE_ENV"]);
-
-      expect(result).toContain("delete");
-      expect(result).toContain("ok");
-      expect(result).toContain("NODE_ENV");
-      expect(mockedGhExec).toHaveBeenCalledWith(
-        ["variable", "delete", "NODE_ENV"],
-        undefined,
+    it("requires a name", async () => {
+      await expect(variableCommand(["delete"], ctx)).rejects.toThrow(
+        "Variable name is required",
       );
     });
 
-    it("throws when variable name is missing", async () => {
-      await expect(variableCommand(["delete"])).rejects.toThrow(AxiError);
+    it("passes --scope through to glab variable delete", async () => {
+      mockedExec.mockResolvedValueOnce("");
+
+      const result = await variableCommand(
+        ["delete", "NODE_ENV", "--scope", "prod"],
+        ctx,
+      );
+
+      expect(execArgsOf()).toEqual([
+        "variable",
+        "delete",
+        "NODE_ENV",
+        "--scope",
+        "prod",
+      ]);
+      expect(result).toContain("delete: ok");
     });
   });
 });

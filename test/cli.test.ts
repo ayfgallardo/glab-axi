@@ -29,6 +29,7 @@ import { SCHEDULE_HELP } from "../src/commands/schedule.js";
 import { REPO_HELP } from "../src/commands/repo.js";
 import { LABEL_HELP } from "../src/commands/label.js";
 import { RELEASE_HELP } from "../src/commands/release.js";
+import { VARIABLE_HELP } from "../src/commands/variable.js";
 import { resolveRepo } from "../src/context.js";
 import { AxiError, StackError } from "../src/errors.js";
 import { encode } from "@toon-format/toon";
@@ -170,6 +171,7 @@ describe("main CLI", () => {
       "repo",
       "label",
       "release",
+      "variable",
     ];
     for (const command of COMMAND_NAMES.filter(
       (name) => !ported.includes(name),
@@ -223,6 +225,13 @@ describe("main CLI", () => {
 
     expect(await options.commands.release(["--help"])).toBe(RELEASE_HELP);
     expect(options.getCommandHelp("release")).toBe(RELEASE_HELP);
+  });
+
+  it("routes variable to the ported command and exposes its help", async () => {
+    const options = await cliOptions();
+
+    expect(await options.commands.variable(["--help"])).toBe(VARIABLE_HELP);
+    expect(options.getCommandHelp("variable")).toBe(VARIABLE_HELP);
   });
 
   it("keeps stack commands cwd-bound", async () => {

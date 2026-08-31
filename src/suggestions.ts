@@ -74,7 +74,7 @@ const table: SuggestionEntry[] = [
   {
     match: (c) => c.domain === "home",
     lines: () => [
-      `Run \`glab-axi <command> <subcommand>\` — commands: issue, pr, run, release, repo, label, secret, variable`,
+      `Run \`glab-axi <command> <subcommand>\` — commands: issue, mr, ci, schedule, release, repo, label, variable`,
     ],
   },
 
@@ -596,51 +596,28 @@ const table: SuggestionEntry[] = [
     ],
   },
 
-  // Secret list
-  {
-    match: (c) => c.domain === "secret" && c.action === "list" && !c.isEmpty,
-    lines: (c) => [
-      `Run \`echo -n "<value>" | glab-axi secret set <name>${repoFlag(c)}\` to add or update a secret`,
-    ],
-  },
-  {
-    match: (c) =>
-      c.domain === "secret" && c.action === "list" && c.isEmpty === true,
-    lines: (c) => [
-      `Run \`echo -n "<value>" | glab-axi secret set <name>${repoFlag(c)}\` to add a secret`,
-    ],
-  },
-
-  // Secret set/delete
-  {
-    match: (c) => c.domain === "secret" && c.action === "set",
-    lines: (c) => [
-      `Run \`glab-axi secret list${repoFlag(c)}\` to see all secrets`,
-    ],
-  },
-  {
-    match: (c) => c.domain === "secret" && c.action === "delete",
-    lines: (c) => [
-      `Run \`glab-axi secret list${repoFlag(c)}\` to see remaining secrets`,
-    ],
-  },
-
   // Variable list
   {
     match: (c) => c.domain === "variable" && c.action === "list" && !c.isEmpty,
     lines: (c) => [
-      `Run \`glab-axi variable set <name> --body <value>${repoFlag(c)}\` to add or update a variable`,
+      `Run \`echo -n "<value>" | glab-axi variable set <name>${repoFlag(c)}\` to add or update a variable`,
     ],
   },
   {
     match: (c) =>
       c.domain === "variable" && c.action === "list" && c.isEmpty === true,
     lines: (c) => [
-      `Run \`glab-axi variable set <name> --body <value>${repoFlag(c)}\` to add a variable`,
+      `Run \`echo -n "<value>" | glab-axi variable set <name>${repoFlag(c)}\` to add a variable`,
     ],
   },
 
-  // Variable set/delete
+  // Variable get/set/delete
+  {
+    match: (c) => c.domain === "variable" && c.action === "get",
+    lines: (c) => [
+      `Run \`glab-axi variable list${repoFlag(c)}\` to see all variables`,
+    ],
+  },
   {
     match: (c) => c.domain === "variable" && c.action === "set",
     lines: (c) => [

@@ -21,10 +21,8 @@
     "src/commands/home.ts",
     "src/commands/project.ts",
     "src/commands/search.ts",
-    "src/commands/secret.ts",
     "src/commands/setup.ts",
     "src/commands/stack.ts",
-    "src/commands/variable.ts",
     "src/totals.ts"
   ]
 }

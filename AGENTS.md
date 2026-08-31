@@ -8,8 +8,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 This repository is a port of gh-axi 0.1.35 (a `gh` wrapper) to `glab`. The core layer is ported; the command families are not yet.
 
-Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/issue.ts`, `src/commands/mr.ts`, `src/commands/ci.ts`, `src/commands/schedule.ts`, and the `issue`, `mr`, `ci` and `schedule` entries of `src/suggestions.ts`.
-Not yet ported: the rest of `src/commands/` plus `src/totals.ts`, `src/gistSelector.ts` and the other domains of `src/suggestions.ts`. Every unported command family routes to an inline stub in `cli.ts` that throws `not ported yet`.
+Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/issue.ts`, `src/commands/mr.ts`, `src/commands/ci.ts`, `src/commands/schedule.ts`, `src/commands/repo.ts`, `src/commands/label.ts`, `src/commands/release.ts`, `src/commands/variable.ts`, and the `issue`, `mr`, `ci`, `schedule`, `repo`, `label`, `release` and `variable` entries of `src/suggestions.ts`. `src/commands/secret.ts` no longer exists — GitLab has no `secret` resource, and its stdin-only value discipline was folded into `variable.ts`'s `set` (see "Variables" below).
+Not yet ported: the rest of `src/commands/` (`snippet`, `stack`, `api`, `setup`, plus the still-gh-shaped `gist.ts`, `project.ts`, `search.ts`) plus `src/totals.ts`, `src/gistSelector.ts` and their domains of `src/suggestions.ts`. Every unported command family routes to an inline stub in `cli.ts` that throws `not ported yet`.
 
 The unported gh modules are held out of the graph so build and test stay green: `tsconfig.json` excludes them file by file (alongside `src/totals.ts`), and `vitest.config.ts` carries a commented `NOT_PORTED_YET` list naming the lot that reclaims each suite. **Each port lot removes its own entry from both lists** — `describe.skip` is not an option, because a suite whose import fails errors before the skip is evaluated.
 
@@ -63,19 +63,14 @@ Like `-R`/`--repo`, `--hostname` must come _after_ the command (the SDK rejects 
 `src/cli.ts`'s `resolveContext` sets `process.env.GITLAB_HOST` only when `--hostname` is present, and `glab.ts#execOptions` also puts it in the child env when the context carries a host, so `glab.ts` is usable without going through the CLI. When no `--hostname` is given, `GITLAB_HOST` is left untouched.
 `src/host.ts#resolveHost()` (flag > `GITLAB_HOST` > `gitlab.com`) is the single source of truth for the effective host used when _building or parsing_ URLs — `parseRemoteUrl` in `src/context.ts` matches it in `git remote` URLs, over a single regex that accepts both SSH and HTTPS forms and any depth of nested group.
 
-## Secret/variable value input (`src/secretValue.ts`, `src/stdin.ts`, `gh.ts#ghExecWithStdin`)
+## Variables (`src/commands/variable.ts`, `src/secretValue.ts`, `src/stdin.ts`, `glab.ts#glabExecWithStdin`)
 
-**[gh-era]** Source material for a later port lot, not current behavior.
+GitLab has one variable resource, not gh's separate `secret`/`variable` split — `glab` has no `secret` subcommand at all, so `secret.ts` was deleted and its stdin-only discipline was folded into `variableCommand`'s `set`. `--masked`/`--protected`/`--scope` (mapping to GitLab's `environment_scope`) replace gh's env-scope split; `list`/`get` print values, matching `glab variable list`/`get` — GitLab variables are not secrets.
 
-`gh secret list`/`gh variable list` do not support `--limit` or any pagination flag (unlike `issue`/`pr`/`release` list), so `secret.ts`/`variable.ts` list all results in one call with no `--limit` flag of their own.
+**Invariant, absolute, no exception:** a variable value must never appear in argv (visible via `ps`) or in an error message. `variableCommand`'s `set` always calls `resolveValue(undefined, "variable")` — never with a flag value — so the value can only come from piped stdin, then goes to `glab.ts#glabExecWithStdin` so the wrapped `glab variable set <key>` child (value positional omitted) also never receives it in argv. There is no `--body`/`-b` flag on `set` at all, unlike gh-axi's original `variable` (which allowed an inline value); this is a deliberate tightening for the GitLab port, not a straight port of gh-axi's behavior.
+`resolveValue` (`src/secretValue.ts`) throws immediately instead of blocking when stdin is an interactive TTY and no usable value source was provided, since AXI commands must never hang waiting for interactive input. It still carries the `"secret" | "variable"` noun distinction from the gh-axi port (kept unchanged per the port brief, backing `test/secretValue.test.ts`), but only `"variable"` is reachable from this codebase now.
 
-Secret values must never appear in argv (visible via `ps`) or stdout.
-`secretCommand`'s `set` subcommand is stdin-only: it rejects `--body`/`-b`, calls `resolveValue(undefined, "secret")`, and pipes the resolved value to `gh.ts#ghExecWithStdin` so the wrapped `gh secret set` child also never receives the value in argv.
-Variable values are not treated as secrets: `variableCommand`'s `set` subcommand may resolve the value from `--body`/`-b` or piped stdin (`resolveValue` in `src/secretValue.ts`, backed by `src/stdin.ts`), and `gh-axi variable list` intentionally prints variable values.
-`variable set --body` values are visible in the `gh-axi` process argv, but `ghExecWithStdin` still keeps them out of the child `gh variable set` argv.
-`resolveValue` throws immediately instead of blocking when stdin is an interactive TTY and no usable value source was provided, since AXI commands must never hang waiting for interactive input.
-
-`secretCommand`'s `list`/`set`/`delete` forward `--env`/`-e <environment>` to `gh secret ... --env` via `resolveScope` in `src/commands/secret.ts`; the repo/host context flags are already stripped in `cli.ts` before the command sees its args, so `-R`/`--hostname` compose with `--env` for free. `resolveScope` is deliberately strict: a malformed `--env` (missing/empty value), conflicting `--env` flags, gh's other scopes (`--org`/`--user`/`--app`, plus the value-channel `--env-file`), and any unknown flag all throw loudly rather than silently falling back to repo scope. Unknown flags are echoed by name only (the `=value` is stripped) so a secret value can never leak into an error message.
+Reads (`list`, `get`) go through `glabApiJson` against `projects/:id/variables[/:key]`; `get`'s optional `--scope` becomes a `filter[environment_scope]` query param. Mutations (`set`, `delete`) go through the `glab variable` subcommand.
 
 ## User-scoped commands (`src/commands/gist.ts`, `src/commands/project.ts`)
 
@@ -184,6 +179,16 @@ Mapping, all verified against the REST docs and a live instance:
 
 `schedule` is the port of gh-axi's `workflow`. GitHub workflows and GitLab schedules are not the same object — a `.gitlab-ci.yml` is not addressable the way a workflow file is — so the port keeps the shape (`list|view|run|enable|disable`) over `/projects/:id/pipeline_schedules`.
 `run` is `glab schedule run <id>` (the API's `POST …/play`), and `enable`/`disable` are `glab schedule update <id> --active=true|false`: the value must be spelled with `=`, and both keep `workflow`'s idempotence check (read the schedule first, report `already_enabled`/`already_disabled` without calling glab).
+
+## Repositories, labels, releases (`src/commands/repo.ts`, `label.ts`, `release.ts`)
+
+All three follow the `mr.ts` split: reads through `glabApiJson` against `projects/:id[/labels|/releases]`, mutations through the owning `glab` subcommand.
+
+`repo`'s `list` has no single `:id` to target — it reads `GET /projects?membership=true` (the caller's own accessible projects), which happens to work with or without a repo context since `glabApiJson` only substitutes `:id` when one appears in the path. `view` drops gh-axi's `issues`/`prs` GraphQL sub-counts and `primaryLanguage` (GitLab's REST project payload carries neither); `open_issues_count` stands in for the issue count. `edit` maps onto `glab repo update`, not `repo edit` — glab has no `edit` verb — and only forwards `--description`/`--default-branch`(`--defaultBranch` on the wire)/`--archive`/`--unarchive`, since glab exposes no visibility or issues/wiki toggle for repo update the way gh does.
+
+`label edit` requires `--label-id` on the wire (glab has no positional label argument); `labelCommand`'s own `edit <name>` positional is passed through as that ID, and `--name` becomes `--new-name` to match glab's actual flag.
+
+`release` drops every GitHub draft/prerelease flag (`--draft`, `--prerelease`, `--generate-notes`, `--discussion-category`, `--notes-start-tag`, `--verify-tag`, `--notes-from-tag`, `--fail-on-no-commits`, `--latest`): GitLab releases have no draft or prerelease concept at all, so there is no REST field or `glab` flag to map them onto. `edit` is not a distinct GitLab operation — `glab release create <tag>` create-or-updates by tag — so `release edit` calls the exact same `glab release create` invocation as `release create`; the two only differ in the message glab-axi renders. `download`'s `--pattern` maps to glab's `--asset-name` (its actual flag name for a glob match).
 
 ## Raising PRs to upstream
 
