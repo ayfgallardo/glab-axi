@@ -14,6 +14,7 @@ vi.mock("../../src/stdin.js", () => ({
 import { glabApiJson, glabExec, glabExecWithStdin } from "../../src/glab.js";
 import { readStdin, isStdinTTY } from "../../src/stdin.js";
 import { variableCommand, VARIABLE_HELP } from "../../src/commands/variable.js";
+import { AxiError } from "../../src/errors.js";
 import type { RepoContext } from "../../src/context.js";
 
 const mockedApi = vi.mocked(glabApiJson);
@@ -115,12 +116,17 @@ describe("variableCommand", () => {
       );
     });
 
-    it("never puts the value in argv: it is piped to glab variable set via stdin", async () => {
+    it("creates via glab variable set when the key does not exist yet, never putting the value in argv", async () => {
+      mockedApi.mockRejectedValueOnce(new AxiError("gone", "NOT_FOUND"));
+
       const result = await variableCommand(
         ["set", "NODE_ENV", "--masked", "--protected", "--scope", "prod"],
         ctx,
       );
 
+      expect(apiPathsOf()).toEqual([
+        "projects/:id/variables/NODE_ENV?filter%5Benvironment_scope%5D=prod",
+      ]);
       const { args, input } = stdinCallOf();
       expect(args).toEqual([
         "variable",
@@ -133,10 +139,32 @@ describe("variableCommand", () => {
       ]);
       expect(args.join(" ")).not.toContain("production");
       expect(input).toBe("production");
-      expect(result).toContain("set: ok");
+      expect(result).toContain("set: created");
+    });
+
+    it("upserts via glab variable update when the key already exists, never putting the value in argv either", async () => {
+      mockedApi.mockResolvedValueOnce(variablePayload());
+
+      const result = await variableCommand(["set", "NODE_ENV"], ctx);
+
+      const { args, input } = stdinCallOf();
+      expect(args).toEqual(["variable", "update", "NODE_ENV"]);
+      expect(args.join(" ")).not.toContain("production");
+      expect(input).toBe("production");
+      expect(result).toContain("set: updated");
+    });
+
+    it("re-throws a non-404 failure from the existence pre-check instead of guessing", async () => {
+      mockedApi.mockRejectedValueOnce(new AxiError("boom", "FORBIDDEN"));
+
+      await expect(variableCommand(["set", "NODE_ENV"], ctx)).rejects.toThrow(
+        "boom",
+      );
+      expect(mockedExecStdin).not.toHaveBeenCalled();
     });
 
     it("throws when stdin is an interactive TTY", async () => {
+      mockedApi.mockRejectedValueOnce(new AxiError("gone", "NOT_FOUND"));
       mockedIsStdinTTY.mockReturnValue(true);
 
       await expect(variableCommand(["set", "NODE_ENV"], ctx)).rejects.toThrow(

@@ -17,20 +17,17 @@ describe("resolveValue", () => {
     vi.resetAllMocks();
   });
 
-  it("returns the variable flag value without touching stdin when provided", async () => {
-    const value = await resolveValue("production", "variable");
-    expect(value).toBe("production");
+  it("rejects a variable flag value: values are stdin-only, glab-axi has no --body flag", async () => {
+    await expect(resolveValue("production", "variable")).rejects.toThrow(
+      "variable values must be piped via stdin; a flag value is not accepted",
+    );
     expect(mockedReadStdin).not.toHaveBeenCalled();
     expect(mockedIsStdinTTY).not.toHaveBeenCalled();
   });
 
-  it("throws when the flag value is empty", async () => {
-    await expect(resolveValue("", "variable")).rejects.toThrow(AxiError);
-  });
-
-  it("rejects secret flag values", async () => {
+  it("rejects a secret flag value the same way", async () => {
     await expect(resolveValue("sk-flag-value", "secret")).rejects.toThrow(
-      "--body/-b is not accepted",
+      "secret values must be piped via stdin; a flag value is not accepted",
     );
     expect(mockedReadStdin).not.toHaveBeenCalled();
     expect(mockedIsStdinTTY).not.toHaveBeenCalled();
@@ -53,22 +50,27 @@ describe("resolveValue", () => {
     expect(mockedReadStdin).not.toHaveBeenCalled();
   });
 
-  it("does not suggest secret flags when secret stdin is missing", async () => {
+  it("names the exact glab-axi stdin command for a missing secret value", async () => {
     mockedIsStdinTTY.mockReturnValue(true);
 
-    await expect(resolveValue(undefined, "secret")).rejects.toThrow(
-      "pipe the value via stdin",
-    );
-    await expect(resolveValue(undefined, "secret")).rejects.not.toThrow(
-      "--body",
-    );
+    await expect(resolveValue(undefined, "secret")).rejects.toMatchObject({
+      message: "secret value is required: pipe the value via stdin",
+      suggestions: ['echo -n "<value>" | glab-axi secret set <name>'],
+    });
   });
 
-  it("keeps variable flag guidance when variable stdin is missing", async () => {
+  it("names the exact glab-axi stdin command for a missing variable value, with no --body mentioned", async () => {
     mockedIsStdinTTY.mockReturnValue(true);
 
-    await expect(resolveValue(undefined, "variable")).rejects.toThrow(
-      "--body <value>",
+    await expect(resolveValue(undefined, "variable")).rejects.toMatchObject({
+      message: "variable value is required: pipe the value via stdin",
+      suggestions: ['echo -n "<value>" | glab-axi variable set <name>'],
+    });
+    await expect(resolveValue(undefined, "variable")).rejects.not.toThrow(
+      "--body",
+    );
+    await expect(resolveValue(undefined, "variable")).rejects.not.toThrow(
+      "gh-axi",
     );
   });
 

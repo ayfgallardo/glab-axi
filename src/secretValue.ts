@@ -2,28 +2,19 @@ import { AxiError } from "./errors.js";
 import { readStdin, isStdinTTY } from "./stdin.js";
 
 function valueRequiredError(noun: "secret" | "variable"): AxiError {
-  if (noun === "secret") {
-    return new AxiError(
-      "secret value is required: pipe the value via stdin",
-      "VALIDATION_ERROR",
-      [`echo -n "<value>" | gh-axi secret set <name>`],
-    );
-  }
-
   return new AxiError(
-    "variable value is required: pass --body <value> or pipe the value via stdin",
+    `${noun} value is required: pipe the value via stdin`,
     "VALIDATION_ERROR",
-    [
-      `gh-axi variable set <name> --body <value>`,
-      `echo -n "<value>" | gh-axi variable set <name>`,
-    ],
+    [`echo -n "<value>" | glab-axi ${noun} set <name>`],
   );
 }
 
 /**
- * Resolve a secret/variable value from an already-extracted flag value,
- * or from piped stdin.
- * Secret callers pass no flag value so secrets are stdin-only.
+ * Resolve a secret/variable value from piped stdin only.
+ * `flagValue` exists for callers that already extracted a flag value from
+ * their own args before calling in; glab-axi never wires one up for either
+ * noun, since a secret or variable value must never reach child-process
+ * argv — passing one is rejected rather than silently accepted.
  * Never accepts an interactive TTY prompt.
  */
 export async function resolveValue(
@@ -31,19 +22,11 @@ export async function resolveValue(
   noun: "secret" | "variable",
 ): Promise<string> {
   if (flagValue !== undefined) {
-    if (noun === "secret") {
-      throw new AxiError(
-        "Secret values must be piped via stdin; --body/-b is not accepted for secrets",
-        "VALIDATION_ERROR",
-        [`echo -n "<value>" | gh-axi secret set <name>`],
-      );
-    }
-    if (flagValue.length === 0) {
-      throw new AxiError(`--body requires a value`, "VALIDATION_ERROR", [
-        `gh-axi ${noun} set <name> --body <value>`,
-      ]);
-    }
-    return flagValue;
+    throw new AxiError(
+      `${noun} values must be piped via stdin; a flag value is not accepted`,
+      "VALIDATION_ERROR",
+      [`echo -n "<value>" | glab-axi ${noun} set <name>`],
+    );
   }
 
   if (isStdinTTY()) {

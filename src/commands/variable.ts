@@ -109,6 +109,29 @@ async function getVariable(args: string[], ctx?: RepoContext): Promise<string> {
   return renderOutput([renderDetail("variable", variable, listSchema)]);
 }
 
+/**
+ * `glab variable set` is create-only; `glab variable update` is the separate
+ * verb for an existing key. Pre-checking via GET (rather than pattern-matching
+ * glab's stderr on a failed `set`) keeps this deterministic and reads stdin
+ * exactly once — the resolved value is needed regardless of which verb runs.
+ */
+async function variableExists(
+  name: string,
+  scope: string | undefined,
+  ctx?: RepoContext,
+): Promise<boolean> {
+  try {
+    await glabApiJson<GlabVariable>(
+      `projects/:id/variables/${encodeURIComponent(name)}${scopeQuery(scope)}`,
+      { ctx },
+    );
+    return true;
+  } catch (err) {
+    if (err instanceof AxiError && err.code === "NOT_FOUND") return false;
+    throw err;
+  }
+}
+
 async function setVariable(args: string[], ctx?: RepoContext): Promise<string> {
   const masked = takeBoolFlag(args, "--masked");
   const protectedFlag = takeBoolFlag(args, "--protected");
@@ -122,11 +145,15 @@ async function setVariable(args: string[], ctx?: RepoContext): Promise<string> {
     );
   }
 
-  const glabArgs = ["variable", "set", name];
+  const exists = await variableExists(name, scope, ctx);
+
+  const glabArgs = ["variable", exists ? "update" : "set", name];
   if (masked) glabArgs.push("--masked");
   if (protectedFlag) glabArgs.push("--protected");
   if (scope) glabArgs.push("--scope", scope);
 
+  // glab variable update also reads the value from stdin when its <value>
+  // positional is omitted, same as set, so the invariant holds on both paths.
   const value = await resolveValue(undefined, "variable");
   await glabExecWithStdin(glabArgs, value, ctx);
 
@@ -137,7 +164,7 @@ async function setVariable(args: string[], ctx?: RepoContext): Promise<string> {
     repo: ctx,
   });
   return renderOutput([
-    encode({ set: "ok", variable: name }),
+    encode({ set: exists ? "updated" : "created", variable: name }),
     renderHelp(suggestions),
   ]);
 }
