@@ -30,10 +30,21 @@ interface ErrorPattern {
   suggestions?: (match: RegExpMatchArray) => string[];
 }
 
+/**
+ * Match an HTTP status only where glab actually prints one: at the start of an
+ * error line (`404 Not Found.`), inside its `(HTTP 404)` suffix, or after the
+ * `: ` that follows the request URL (`GET https://…/pipelines/12: 403 {…}`).
+ * A bare `\b404\b` would also hit a resource id inside that URL, which would
+ * misclassify every other failure on issue/MR iid 400, 403, 404 or 429.
+ */
+function httpStatus(...codes: number[]): string {
+  return `(?:^|\\(HTTP |:\\s)(?:${codes.join("|")})\\b`;
+}
+
 const patterns: ErrorPattern[] = [
   {
     // glab returns this for an unknown project OR one the token cannot see, and
-    // it must sit ahead of the bare 404 pattern below.
+    // it must sit ahead of the generic 404 pattern below.
     pattern: /404 (?:Project|Group) Not Found/i,
     code: "REPO_NOT_FOUND",
     message: (m) =>
@@ -44,7 +55,7 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
-    pattern: /\b404\b/,
+    pattern: new RegExp(httpStatus(404), "m"),
     code: "NOT_FOUND",
     message: (_m, stderr) => firstErrorLine(stderr),
   },
@@ -58,7 +69,7 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
-    pattern: /\b401\b|\bUnauthorized\b/i,
+    pattern: new RegExp(`${httpStatus(401)}|\\bUnauthorized\\b`, "im"),
     code: "AUTH_REQUIRED",
     message: () => "GitLab auth required — run `glab auth login` first",
     suggestions: () => [
@@ -67,7 +78,10 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
-    pattern: /\b429\b|Too Many Requests|Retry later/i,
+    pattern: new RegExp(
+      `${httpStatus(429)}|Too Many Requests|Retry later`,
+      "im",
+    ),
     code: "RATE_LIMITED",
     message: () => "GitLab rate limit hit — wait and retry",
     suggestions: () => [
@@ -76,7 +90,7 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
-    pattern: /\b403\b|\bForbidden\b/i,
+    pattern: new RegExp(`${httpStatus(403)}|\\bForbidden\\b`, "im"),
     code: "FORBIDDEN",
     message: () => "Insufficient permissions for this action",
     suggestions: () => [
@@ -85,7 +99,7 @@ const patterns: ErrorPattern[] = [
     ],
   },
   {
-    pattern: /\b(?:400|422)\b/,
+    pattern: new RegExp(httpStatus(400, 422), "m"),
     code: "VALIDATION_ERROR",
     message: (_m, stderr) => apiMessage(stderr) ?? "Validation error",
   },

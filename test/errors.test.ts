@@ -102,6 +102,46 @@ describe("mapGlabError", () => {
     expect(err.code).toBe("VALIDATION_ERROR");
   });
 
+  describe("a resource id that looks like an HTTP status", () => {
+    it("classifies a 403 on resource 404 as FORBIDDEN, not NOT_FOUND", () => {
+      const err = mapGlabError(
+        boxed(
+          "Get https://gitlab.com/api/v4/projects/g%2Fp/pipelines/404: 403 {message: 403 Forbidden}.",
+        ),
+        1,
+      );
+      expect(err.code).toBe("FORBIDDEN");
+    });
+
+    it("classifies a 404 on resource 403 as NOT_FOUND, not FORBIDDEN", () => {
+      const err = mapGlabError(
+        boxed(
+          "Get https://gitlab.com/api/v4/projects/g%2Fp/issues/403: 404 {message: 404 Not Found}.",
+        ),
+        1,
+      );
+      expect(err.code).toBe("NOT_FOUND");
+    });
+
+    it("does not read a rate limit out of an iid of 429", () => {
+      const err = mapGlabError(
+        boxed(
+          "Get https://gitlab.com/api/v4/projects/g%2Fp/merge_requests/429: 401 {message: 401 Unauthorized}.",
+        ),
+        1,
+      );
+      expect(err.code).toBe("AUTH_REQUIRED");
+    });
+
+    it("does not classify a plain failure on resource 400 as a validation error", () => {
+      const err = mapGlabError(
+        boxed("Get https://gitlab.com/api/v4/projects/g%2Fp/jobs/400: EOF."),
+        1,
+      );
+      expect(err.code).toBe("UNKNOWN");
+    });
+  });
+
   it("returns NOT_FOUND for generic not found messages", () => {
     const err = mapGlabError("something not found", 1);
     expect(err.code).toBe("NOT_FOUND");
