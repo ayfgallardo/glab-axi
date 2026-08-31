@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/glab.js", () => ({
   glabApiJson: vi.fn(),
@@ -210,6 +213,89 @@ describe("snippetCommand", () => {
           ctx,
         ),
       ).rejects.toBeInstanceOf(AxiError);
+    });
+
+    describe("multiple --file inputs", () => {
+      let dir: string;
+      let pathA: string;
+      let pathB: string;
+
+      beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), "glab-axi-snippet-create-"));
+        pathA = join(dir, "a.py");
+        pathB = join(dir, "b.py");
+        writeFileSync(pathA, "content a", "utf8");
+        writeFileSync(pathB, "content b", "utf8");
+      });
+
+      afterEach(() => {
+        rmSync(dir, { recursive: true, force: true });
+      });
+
+      it("attaches every --file, not just the first", async () => {
+        mockedApiJson.mockResolvedValue({
+          id: 6,
+          title: "x",
+          description: null,
+          visibility: "private",
+          updated_at: "2024-01-01T00:00:00Z",
+          web_url: "https://x",
+        });
+
+        await snippetCommand(
+          ["create", "--title", "x", "--file", pathA, "--file", pathB],
+          ctx,
+        );
+
+        expect(mockedApiJson).toHaveBeenCalledWith("projects/:id/snippets", {
+          ctx,
+          method: "POST",
+          fields: {
+            title: "x",
+            visibility: "private",
+            "files[0][file_path]": "a.py",
+            "files[0][content]": "content a",
+            "files[1][file_path]": "b.py",
+            "files[1][content]": "content b",
+          },
+        });
+      });
+
+      it("attaches every positional path, not just the first", async () => {
+        mockedApiJson.mockResolvedValue({
+          id: 7,
+          title: "x",
+          description: null,
+          visibility: "private",
+          updated_at: "2024-01-01T00:00:00Z",
+          web_url: "https://x",
+        });
+
+        await snippetCommand(["create", "--title", "x", pathA, pathB], ctx);
+
+        expect(mockedApiJson).toHaveBeenCalledWith("projects/:id/snippets", {
+          ctx,
+          method: "POST",
+          fields: {
+            title: "x",
+            visibility: "private",
+            "files[0][file_path]": "a.py",
+            "files[0][content]": "content a",
+            "files[1][file_path]": "b.py",
+            "files[1][content]": "content b",
+          },
+        });
+      });
+
+      it("rejects mixing positional paths with --file", async () => {
+        await expect(
+          snippetCommand(
+            ["create", "--title", "x", pathA, "--file", pathB],
+            ctx,
+          ),
+        ).rejects.toBeInstanceOf(AxiError);
+        expect(mockedApiJson).not.toHaveBeenCalled();
+      });
     });
   });
 

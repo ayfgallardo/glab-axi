@@ -284,9 +284,6 @@ async function createSnippet(
   const fields: Record<string, string> = { title, visibility };
   if (description) fields.description = description;
 
-  let filePath: string;
-  let content: string;
-
   if (filename !== undefined) {
     if (isStdinTTY()) {
       throw new AxiError(
@@ -297,18 +294,24 @@ async function createSnippet(
         ],
       );
     }
-    filePath = filename;
-    content = await readRequiredStdin(
+    const content = await readRequiredStdin(
       `echo 'content' | glab-axi snippet create --filename <name> --title <text>`,
     );
+    fields["files[0][file_path]"] = filename;
+    fields["files[0][content]"] = content;
   } else {
-    const path = positionals.length > 0 ? positionals[0] : fileFlags[0];
-    filePath = path.split("/").pop() ?? path;
-    content = await readFileContent(path);
+    // positionals and fileFlags are mutually exclusive (rejected above), so
+    // exactly one of the two is the ordered list of paths to attach — every
+    // one of them, not just the first (AGENTS.md "Repeatable flags": a
+    // repeatable input collected in full must never be consumed partially).
+    const paths = positionals.length > 0 ? positionals : fileFlags;
+    for (const [index, path] of paths.entries()) {
+      const filePath = path.split("/").pop() ?? path;
+      const content = await readFileContent(path);
+      fields[`files[${index}][file_path]`] = filePath;
+      fields[`files[${index}][content]`] = content;
+    }
   }
-
-  fields["files[0][file_path]"] = filePath;
-  fields["files[0][content]"] = content;
 
   const created = await glabApiJson<SnippetSummary>(basePath(personal), {
     ctx: effectiveCtx,
