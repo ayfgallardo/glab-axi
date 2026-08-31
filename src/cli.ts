@@ -17,7 +17,7 @@ import { snippetCommand, SNIPPET_HELP } from "./commands/snippet.js";
 import { stackCommand, STACK_HELP } from "./commands/stack.js";
 import { apiCommand, API_HELP } from "./commands/api.js";
 import { setupCommand, SETUP_HELP } from "./commands/setup.js";
-import { homeCommand } from "./commands/home.js";
+import { homeCommand, HOME_HELP } from "./commands/home.js";
 
 export const DESCRIPTION =
   "Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.";
@@ -30,6 +30,7 @@ type MainOptions = {
 };
 
 export const COMMAND_NAMES = [
+  "home",
   "issue",
   "mr",
   "ci",
@@ -61,6 +62,7 @@ examples:
 `;
 
 const COMMAND_HELP: Record<string, string> = {
+  home: HOME_HELP,
   issue: ISSUE_HELP,
   mr: MR_HELP,
   ci: CI_HELP,
@@ -81,6 +83,7 @@ type CommandFn = (args: string[], ctx?: RepoContext) => Promise<string>;
 type WrappedCommandFn = (args: string[], ctx?: CliContext) => Promise<string>;
 
 const COMMANDS: Record<string, WrappedCommandFn> = {
+  home: withRepoContext(homeCommand),
   issue: withRepoContext(issueCommand),
   mr: withRepoContext(mrCommand),
   ci: withRepoContext(ciCommand),

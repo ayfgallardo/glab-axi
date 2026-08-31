@@ -34,6 +34,7 @@ import { REPO_HELP } from "../src/commands/repo.js";
 import { LABEL_HELP } from "../src/commands/label.js";
 import { RELEASE_HELP } from "../src/commands/release.js";
 import { VARIABLE_HELP } from "../src/commands/variable.js";
+import { HOME_HELP } from "../src/commands/home.js";
 import { resolveRepo } from "../src/context.js";
 import { glabApiJson } from "../src/glab.js";
 import { AxiError, StackError } from "../src/errors.js";
@@ -77,6 +78,7 @@ describe("main CLI", () => {
 
   it("routes exactly the GitLab command surface", () => {
     expect(COMMAND_NAMES).toEqual([
+      "home",
       "issue",
       "mr",
       "ci",
@@ -115,7 +117,7 @@ describe("main CLI", () => {
   });
 
   it("lists the command surface and dashboard in the top-level help", () => {
-    expect(TOP_HELP).toContain("commands[13]:");
+    expect(TOP_HELP).toContain("commands[14]:");
     expect(TOP_HELP).toContain("(none)=dashboard");
     for (const command of COMMAND_NAMES) {
       expect(TOP_HELP).toContain(command);
@@ -171,6 +173,18 @@ describe("main CLI", () => {
     vi.mocked(glabApiJson).mockResolvedValue([]);
     const homeResult = await options.home([], ctx);
     expect(homeResult).toContain("assigned_mrs: 0 open");
+  });
+
+  it("routes explicit home to the same dashboard handler as the bare form", async () => {
+    const options = await cliOptions();
+
+    vi.mocked(glabApiJson).mockResolvedValue([]);
+    const result = await options.commands.home([], {
+      fullPath: "group/project",
+      source: "git",
+    });
+    expect(result).toContain("assigned_mrs: 0 open");
+    expect(options.getCommandHelp("home")).toBe(HOME_HELP);
   });
 
   it("routes issue to the ported command and exposes its help", async () => {
