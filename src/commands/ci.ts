@@ -47,6 +47,7 @@ interface Job {
   name?: string;
   stage?: string;
   status?: string;
+  pipeline?: { id: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,13 @@ async function fetchJobs(id: number, ctx?: RepoContext): Promise<Job[]> {
     pipelinePath(id, `/jobs?per_page=${PER_PAGE_MAX}`),
     { ctx },
   );
+}
+
+/** The job list is one page deep, so say so rather than let it read as complete. */
+function jobsTruncationNotice(jobs: Job[]): string[] {
+  return jobs.length === PER_PAGE_MAX
+    ? [`jobs: showing the first ${PER_PAGE_MAX} (the pipeline may have more)`]
+    : [];
 }
 
 /** Point the agent at the log of every job that failed. */
@@ -148,6 +156,15 @@ const jobSchema: FieldDef[] = [
   field("stage"),
   lower("status"),
   field("duration"),
+];
+
+const jobDetailSchema: FieldDef[] = [
+  ...jobSchema,
+  pluck("pipeline", "id", "pipeline"),
+  field("ref"),
+  field("allow_failure"),
+  relativeTime("created_at", "created"),
+  field("web_url", "url"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -269,6 +286,7 @@ async function ciStatus(args: string[], ctx?: RepoContext): Promise<string> {
 
   return renderOutput([
     renderDetail("pipeline", pipeline, pipelineSchema),
+    ...jobsTruncationNotice(jobs),
     renderList("jobs", jobs, jobSchema),
     renderHelp([
       ...failedJobSuggestions(jobs, ctx),
@@ -288,29 +306,33 @@ async function ciView(args: string[], ctx?: RepoContext): Promise<string> {
   const statusFilter = takeFlag(args, "--status");
   const id = takeNumber(args, "pipeline");
 
-  const pipeline = await fetchPipeline(id, ctx);
-  const jobs = await fetchJobs(id, ctx);
-
   if (jobFlag) {
-    const job = jobs.find((candidate) => String(candidate.id) === jobFlag);
-    if (!job) {
+    // Read the job directly: filtering the (one-page) job list would report a
+    // job past the 100th as missing from a pipeline that does contain it.
+    const job = await glabApiJson<Job>(`projects/:id/jobs/${jobFlag}`, { ctx });
+    if (job.pipeline?.id !== id) {
       throw new AxiError(
-        `Job ${jobFlag} not found in pipeline ${id}`,
+        `Job ${jobFlag} belongs to pipeline ${job.pipeline?.id ?? "unknown"}, not ${id}`,
         "VALIDATION_ERROR",
       );
     }
     return renderOutput([
-      renderDetail("pipeline", pipeline, pipelineSchema),
-      renderDetail("job", job, jobSchema),
+      renderDetail("job", job, jobDetailSchema),
       renderHelp(failedJobSuggestions([job], ctx)),
     ]);
   }
+
+  const pipeline = await fetchPipeline(id, ctx);
+  const jobs = await fetchJobs(id, ctx);
 
   const shown = statusFilter
     ? jobs.filter((job) => job.status === statusFilter)
     : jobs;
 
-  const blocks = [renderDetail("pipeline", pipeline, pipelineSchema)];
+  const blocks = [
+    renderDetail("pipeline", pipeline, pipelineSchema),
+    ...jobsTruncationNotice(jobs),
+  ];
   if (statusFilter) {
     blocks.push(
       `jobs: ${shown.length} of ${jobs.length} with status=${statusFilter}`,

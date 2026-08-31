@@ -54,6 +54,7 @@ function job(overrides: Record<string, unknown> = {}) {
     status: "success",
     allow_failure: false,
     duration: 42,
+    pipeline: { id: 52377 },
     web_url: "https://gitlab.example.com/group/sub/project/-/jobs/199506",
     ...overrides,
   };
@@ -162,7 +163,9 @@ describe("ciCommand", () => {
 
       await ciCommand(["status", "--branch", "main"], ctx);
 
-      expect(apiPathsOf()[0]).toBe("projects/:id/pipelines?per_page=1&ref=main");
+      expect(apiPathsOf()[0]).toBe(
+        "projects/:id/pipelines?per_page=1&ref=main",
+      );
     });
 
     it("leaves the query unfiltered outside a checkout", async () => {
@@ -197,6 +200,19 @@ describe("ciCommand", () => {
 
       expect(result).toContain("glab-axi ci log 199507");
     });
+
+    it("says so when the job list hits the single-page cap", async () => {
+      mockedBranch.mockReturnValue("main");
+      mockedApi
+        .mockResolvedValueOnce([pipeline()])
+        .mockResolvedValueOnce(
+          Array.from({ length: 100 }, (_, i) => job({ id: 1000 + i })),
+        );
+
+      const result = await ciCommand(["status"], ctx);
+
+      expect(result).toContain("jobs: showing the first 100");
+    });
   });
 
   describe("view", () => {
@@ -221,30 +237,26 @@ describe("ciCommand", () => {
       });
     });
 
-    it("renders a single job with --job", async () => {
-      mockedApi
-        .mockResolvedValueOnce(pipeline())
-        .mockResolvedValueOnce([
-          job(),
-          job({ id: 199507, name: "test", status: "failed" }),
-        ]);
+    it("reads a single job straight from the job endpoint", async () => {
+      mockedApi.mockResolvedValue(
+        job({ id: 199507, name: "test", status: "failed" }),
+      );
 
       const result = await ciCommand(["view", "52377", "--job", "199507"], ctx);
 
+      expect(mockedApi).toHaveBeenCalledTimes(1);
+      expect(apiPathsOf()[0]).toBe("projects/:id/jobs/199507");
       expect(result).toContain("test");
-      expect(result).not.toContain("199506");
     });
 
-    it("throws when --job is not part of the pipeline", async () => {
-      mockedApi
-        .mockResolvedValueOnce(pipeline())
-        .mockResolvedValueOnce([job()]);
+    it("throws when --job belongs to another pipeline", async () => {
+      mockedApi.mockResolvedValue(job({ id: 199507, pipeline: { id: 52376 } }));
 
       await expect(
-        ciCommand(["view", "52377", "--job", "999"], ctx),
+        ciCommand(["view", "52377", "--job", "199507"], ctx),
       ).rejects.toMatchObject({
         code: "VALIDATION_ERROR",
-        message: "Job 999 not found in pipeline 52377",
+        message: "Job 199507 belongs to pipeline 52376, not 52377",
       });
     });
 
