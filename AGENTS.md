@@ -8,7 +8,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 This repository is a port of gh-axi 0.1.35 (a `gh` wrapper) to `glab`. The core layer is ported; the command families are not yet.
 
-Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/mr.ts`, `src/commands/ci.ts`, `src/commands/schedule.ts`, and the `mr`, `ci` and `schedule` entries of `src/suggestions.ts`.
+Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/issue.ts`, `src/commands/mr.ts`, `src/commands/ci.ts`, `src/commands/schedule.ts`, and the `issue`, `mr`, `ci` and `schedule` entries of `src/suggestions.ts`.
 Not yet ported: the rest of `src/commands/` plus `src/totals.ts`, `src/gistSelector.ts` and the other domains of `src/suggestions.ts`. Every unported command family routes to an inline stub in `cli.ts` that throws `not ported yet`.
 
 The unported gh modules are held out of the graph so build and test stay green: `tsconfig.json` excludes them file by file (alongside `src/totals.ts`), and `vitest.config.ts` carries a commented `NOT_PORTED_YET` list naming the lot that reclaims each suite. **Each port lot removes its own entry from both lists** — `describe.skip` is not an option, because a suite whose import fails errors before the skip is evaluated.
@@ -103,8 +103,10 @@ Requires the `project` (or `read:project`) OAuth scope on the `gh` token; `src/e
 `glab` accepts `--label`, `--assignee`, `--reviewer`, and the `--add-*`/`--remove-*` variants once per value, so glab-axi must collect _every_ occurrence.
 Use `getAllFlags`/`takeAllFlags` plus `pushRepeated`; `getFlag`/`takeFlag` keep only the first occurrence and silently discard the rest, which is the bug that recurred as #55, #57, and #75.
 Both collectors reject a dangling (`--label` with nothing after it) or blank (`--label=`) value with a `VALIDATION_ERROR` instead of dropping it.
-Pick the collector that matches the surrounding file: `mr.ts` consumes them (`takeAllFlags`).
+Pick the collector that matches the surrounding file: `mr.ts` and `issue.ts` consume them (`takeAllFlags`).
 When a flag becomes repeatable, mark it `(repeatable)` in that command's `*_HELP` string.
+
+`resolveLimit`/`PER_PAGE_MAX` (clamp `--limit` to GitLab's 100-per-page cap) live here too, shared by `ci.ts`, `schedule.ts` and `issue.ts` — do not reintroduce a fourth copy.
 
 ## `--version` fast path (`bin/glab-axi.ts`, `src/version.ts`)
 
@@ -120,6 +122,22 @@ This only works because `src/version.ts` is a LEAF module importing node builtin
 Stack commands are cwd-bound. `cli.ts#withLocalRepoContext` rejects explicit repo flags and `GH_REPO`, strips the supported host flag, and never passes a `RepoContext` to `ghRaw`, because the extension does not accept `--repo`.
 Successful extension status is commonly written to stderr, and exits 2-10 represent actionable stack state. Preserve both streams and the exact `StackError.exitCode`, which reaches the shell only through `cli.ts`'s `formatError` hook; do not replace `ghRaw` with `ghExec` or generic `mapGhError`.
 Never expose an interactive path. Force `view --json`, `submit --auto`, and `merge --yes`; require arguments for commands that otherwise prompt. Keep `modify`, `switch`, `alias`, and `feedback` out unless upstream gains a useful headless interface.
+
+## Issues (`src/commands/issue.ts`)
+
+Reads go through `glabApiJson` against `projects/:id/issues[/:iid]` and are shaped locally before TOON; mutations go through the `glab issue` subcommand that owns the flow (`create`, `close`, `reopen`, `delete`, `update`), same split as `mr.ts`. `comment` is the one deliberate crossing: it posts through the API (`POST …/issues/:iid/notes`) because `glab issue note` returns no parseable output to build a structured response from, even though — unlike `mr note create` — it is not EXPERIMENTAL.
+
+`glab issue update` has no `--yes`, unlike `mr update`; the guard from the old gh-axi port (skip the subcommand call entirely when no field besides the iid changed) is kept because calling it with nothing but the iid still errors.
+
+`lock`/`unlock` map onto `glab issue update --lock-discussion`/`--unlock-discussion`, gated by the same idempotent-check-then-mutate pattern as `close`/`reopen` (read `discussion_locked` first, no-op with `already: true` when it already matches).
+
+Three gh-axi surfaces were dropped rather than ported, all genuinely GitHub-only with no GitLab REST equivalent — not a straight GraphQL→REST swap:
+
+- `--project <name>` on `create` (GitHub Projects v2 linking).
+- `transfer` (GitHub's cross-org issue transfer; GitLab's closest analog, `POST …/issues/:iid/move`, only moves within the same instance and has no `glab` subcommand).
+- `subissue add/remove/list` (GitHub's GraphQL parent/child hierarchy; GitLab's nearest REST feature, `projects/:id/issues/:issue_iid/links`, models `relates_to`/`blocks`/`is_blocked_by` between peers, not a hierarchy — different enough semantics that renaming it in place would misrepresent the feature).
+
+`pin`/`unpin` were dropped too: GitLab issues have no pinning concept at all.
 
 ## Merge requests (`src/commands/mr.ts`)
 
@@ -152,7 +170,7 @@ Mapping, all verified against the REST docs and a live instance:
 
 - `list` and `status` both read `GET /projects/:id/pipelines` (`status` as `?ref=<branch>&per_page=1`). **Do not switch `status` to `pipelines/latest`**: that endpoint answers **403** when the ref has no pipeline, which would report the most common benign state of the module's most used command as FORBIDDEN. The list endpoint answers `200 []`, rendered as an explicit `no pipeline for <ref>`. `status` defaults its ref to the checked-out branch (`resolveCurrentBranch` in `context.ts`), even under `-R`.
 - `view` -> the pipeline plus `GET /projects/:id/pipelines/:pipeline_id/jobs`, but `view --job` reads `GET /projects/:id/jobs/:job_id` and checks the job's own `pipeline.id`. Filtering the job list would call a job past the 100th missing from a pipeline that does contain it.
-- `retry` and `cancel` are **mutations done through the API** (`POST …/pipelines/:id/retry|cancel`, `POST …/jobs/:id/retry`), unlike the `mr` rule of preferring the subcommand: `glab ci retry` only ever retries a *job* and prompts interactively without one, and `glab ci cancel pipeline` would then be the odd one out.
+- `retry` and `cancel` are **mutations done through the API** (`POST …/pipelines/:id/retry|cancel`, `POST …/jobs/:id/retry`), unlike the `mr` rule of preferring the subcommand: `glab ci retry` only ever retries a _job_ and prompts interactively without one, and `glab ci cancel pipeline` would then be the odd one out.
 - `run` does go through `glab ci run` (`--branch`, repeatable `--variables k:v`); the new pipeline id is parsed out of the emitted URL, as in `mr create`.
 - `log <job-id>` -> `GET /projects/:id/jobs/:job_id/trace`, which returns **plain text** — hence `glabApiText`. The trace is the runner's raw terminal output, so the ANSI escapes are stripped (gh already hands back a clean log) before the tail-first truncation at 20 000 chars and the best-effort full-log tempfile.
 - `watch` polls the pipeline itself (`--interval`, `--timeout`, both bounded): `glab ci status --live` and `glab ci view` are TUIs, and AXI commands must never go interactive. A timeout returns `timed_out: true` rather than an error.

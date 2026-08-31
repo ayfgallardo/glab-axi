@@ -82,7 +82,7 @@ const table: SuggestionEntry[] = [
   {
     match: (c) => c.domain === "issue" && c.action === "list" && !c.isEmpty,
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} issue view <number>\` to view details`,
+      `Run \`glab-axi${repoFlag(c)} issue view <iid>\` to view details`,
       `Run \`glab-axi${repoFlag(c)} issue create --title "..." --body-file <path>\` to create`,
     ],
   },
@@ -166,20 +166,12 @@ const table: SuggestionEntry[] = [
     ],
   },
 
-  // Issue lock/unlock/pin/unpin
+  // Issue lock/unlock
   {
-    match: (c) =>
-      c.domain === "issue" &&
-      ["lock", "unlock", "pin", "unpin"].includes(c.action),
+    match: (c) => c.domain === "issue" && ["lock", "unlock"].includes(c.action),
     lines: (c) => [
       `Run \`glab-axi${repoFlag(c)} issue view ${c.id}\` to see issue details`,
     ],
-  },
-
-  // Issue transfer
-  {
-    match: (c) => c.domain === "issue" && c.action === "transfer",
-    lines: () => [],
   },
 
   // MR list

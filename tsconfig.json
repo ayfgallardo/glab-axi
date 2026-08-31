@@ -19,7 +19,6 @@
     "src/commands/api.ts",
     "src/commands/gist.ts",
     "src/commands/home.ts",
-    "src/commands/issue.ts",
     "src/commands/label.ts",
     "src/commands/project.ts",
     "src/commands/release.ts",

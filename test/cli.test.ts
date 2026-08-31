@@ -22,6 +22,7 @@ import {
   parseRepoContextArgs,
   TOP_HELP,
 } from "../src/cli.js";
+import { ISSUE_HELP } from "../src/commands/issue.js";
 import { MR_HELP } from "../src/commands/mr.js";
 import { CI_HELP } from "../src/commands/ci.js";
 import { SCHEDULE_HELP } from "../src/commands/schedule.js";
@@ -158,7 +159,7 @@ describe("main CLI", () => {
     const options = await cliOptions();
     const ctx = { fullPath: "group/project", source: "git" };
 
-    const ported = ["mr", "ci", "schedule"];
+    const ported = ["issue", "mr", "ci", "schedule"];
     for (const command of COMMAND_NAMES.filter(
       (name) => !ported.includes(name),
     )) {
@@ -167,6 +168,13 @@ describe("main CLI", () => {
       );
     }
     await expect(options.home([], ctx)).rejects.toThrow("not ported yet");
+  });
+
+  it("routes issue to the ported command and exposes its help", async () => {
+    const options = await cliOptions();
+
+    expect(await options.commands.issue(["--help"])).toBe(ISSUE_HELP);
+    expect(options.getCommandHelp("issue")).toBe(ISSUE_HELP);
   });
 
   it("routes mr to the ported command and exposes its help", async () => {

@@ -5,6 +5,7 @@ import { resolveHost, type HostContext } from "./host.js";
 import { VERSION } from "./version.js";
 import { withSuggestionHost } from "./suggestions.js";
 import { AxiError, exitCodeForError, StackError } from "./errors.js";
+import { issueCommand, ISSUE_HELP } from "./commands/issue.js";
 import { mrCommand, MR_HELP } from "./commands/mr.js";
 import { ciCommand, CI_HELP } from "./commands/ci.js";
 import { scheduleCommand, SCHEDULE_HELP } from "./commands/schedule.js";
@@ -51,6 +52,7 @@ examples:
 `;
 
 const COMMAND_HELP: Record<string, string> = {
+  issue: ISSUE_HELP,
   mr: MR_HELP,
   ci: CI_HELP,
   schedule: SCHEDULE_HELP,
@@ -67,7 +69,7 @@ const notPorted = async (): Promise<string> => {
 };
 
 const COMMANDS: Record<string, WrappedCommandFn> = {
-  issue: withRepoContext(notPorted),
+  issue: withRepoContext(issueCommand),
   mr: withRepoContext(mrCommand),
   ci: withRepoContext(ciCommand),
   schedule: withRepoContext(scheduleCommand),
