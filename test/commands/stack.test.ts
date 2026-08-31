@@ -1,330 +1,175 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../src/gh.js", () => ({ ghRaw: vi.fn() }));
+vi.mock("../../src/glab.js", () => ({ glabRaw: vi.fn() }));
 
-import { ghRaw } from "../../src/gh.js";
+import { glabRaw } from "../../src/glab.js";
 import { stackCommand, STACK_HELP } from "../../src/commands/stack.js";
 import { AxiError, StackError } from "../../src/errors.js";
 
-const mockedGhRaw = vi.mocked(ghRaw);
+const mockedGlabRaw = vi.mocked(glabRaw);
 
 describe("stackCommand", () => {
   beforeEach(() => vi.resetAllMocks());
 
-  it("returns help without invoking gh", async () => {
+  it("returns help without invoking glab", async () => {
     expect(await stackCommand([])).toBe(STACK_HELP);
-    expect(mockedGhRaw).not.toHaveBeenCalled();
+    expect(mockedGlabRaw).not.toHaveBeenCalled();
   });
 
-  it("always views the stack as JSON and renders TOON", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stderr: "",
-      stdout: JSON.stringify({
-        trunk: "main",
-        currentBranch: "api",
-        branches: [
-          {
-            name: "model",
-            isCurrent: false,
-            isMerged: false,
-            isQueued: false,
-            needsRebase: false,
-            pr: {
-              number: 42,
-              url: "https://github.com/o/r/pull/42",
-              state: "OPEN",
-            },
-          },
-          {
-            name: "api",
-            isCurrent: true,
-            isMerged: false,
-            isQueued: false,
-            needsRebase: true,
-          },
-        ],
-      }),
-    });
-
-    const output = await stackCommand(["view"]);
-
-    expect(mockedGhRaw).toHaveBeenCalledWith(["stack", "view", "--json"]);
-    expect(output).toContain("current_branch: api");
-    expect(output).toContain("branch_count: 2");
-    expect(output).toContain("model,false,open,false,42");
-    expect(output).toContain("api,true,local,true,null,null");
-  });
-
-  it("forces submit into auto mode", async () => {
-    mockedGhRaw.mockResolvedValue({
+  it("creates a new stack", async () => {
+    mockedGlabRaw.mockResolvedValue({
       exitCode: 0,
       stdout: "",
-      stderr: "✓ Pushed and synced 2 branches\n",
+      stderr: "✓ Stack feature-api created\n",
     });
 
-    const output = await stackCommand(["submit", "--open"]);
+    const output = await stackCommand(["create", "feature-api"]);
 
-    expect(mockedGhRaw).toHaveBeenCalledWith([
+    expect(mockedGlabRaw).toHaveBeenCalledWith([
       "stack",
-      "submit",
-      "--open",
-      "--auto",
+      "create",
+      "feature-api",
     ]);
     expect(output).toContain("status: ok");
-    expect(output).toContain("Pushed and synced 2 branches");
+    expect(output).toContain("Stack feature-api created");
   });
 
-  it("forces merge confirmation and requires a target", async () => {
-    await expect(stackCommand(["merge", "--squash"])).rejects.toBeInstanceOf(
-      AxiError,
-    );
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stdout: "",
-      stderr: "Merged stack\n",
-    });
+  it("requires a name for create", async () => {
+    await expect(stackCommand(["create"])).rejects.toBeInstanceOf(AxiError);
+    expect(mockedGlabRaw).not.toHaveBeenCalled();
+  });
 
-    await stackCommand(["merge", "42", "--squash"]);
+  it("requires -m/-d for save, never opening an editor", async () => {
+    await expect(stackCommand(["save"])).rejects.toThrow(/-m\/--message/);
+    expect(mockedGlabRaw).not.toHaveBeenCalled();
+  });
 
-    expect(mockedGhRaw).toHaveBeenCalledWith([
+  it("saves staged changes with a message", async () => {
+    mockedGlabRaw.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+
+    await stackCommand(["save", "-a", "-m", "add endpoint"]);
+
+    expect(mockedGlabRaw).toHaveBeenCalledWith([
       "stack",
-      "merge",
-      "42",
-      "--squash",
-      "--yes",
+      "save",
+      "--all",
+      "--message",
+      "add endpoint",
     ]);
   });
 
-  it("rejects interactive forms before invoking gh", async () => {
-    await expect(stackCommand(["init"])).rejects.toBeInstanceOf(AxiError);
-    await expect(stackCommand(["checkout"])).rejects.toBeInstanceOf(AxiError);
-    await expect(stackCommand(["add"])).rejects.toBeInstanceOf(AxiError);
-    expect(mockedGhRaw).not.toHaveBeenCalled();
-  });
+  it("amends with -d as an alias for the message", async () => {
+    mockedGlabRaw.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
 
-  it("allows message-driven add and validates staging flags", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stdout: "",
-      stderr: "Created branch\n",
-    });
+    await stackCommand(["amend", "-d", "fix typo"]);
 
-    await stackCommand(["add", "-Am", "Add API"]);
-
-    expect(mockedGhRaw).toHaveBeenCalledWith([
+    expect(mockedGlabRaw).toHaveBeenCalledWith([
       "stack",
-      "add",
-      "-Am",
-      "Add API",
+      "amend",
+      "--message",
+      "fix typo",
     ]);
-    await expect(stackCommand(["add", "--all", "api"])).rejects.toThrow(
-      /require --message/,
-    );
   });
 
-  it("reports a non-interactive sync abort distinctly", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stdout: "",
-      stderr: "ℹ Sync aborted — no changes were made\n",
-    });
+  it("forwards sync flags including repeatable ones", async () => {
+    mockedGlabRaw.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
 
-    const output = await stackCommand(["sync"]);
-
-    expect(output).toContain("status: aborted");
-  });
-
-  it("reports successful syncs with failed steps as partial", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stdout: "",
-      stderr:
-        "⚠ Push failed — branches may need force push after rebase\n✓ Branches synced\n",
-    });
-
-    const output = await stackCommand(["sync"]);
-
-    expect(output).toContain("status: partial");
-    expect(output).toContain("Push failed");
-  });
-
-  it("reports unmarked git push diagnostics as partial", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stdout: "",
-      stderr:
-        "error: failed to push some refs to 'https://github.com/o/r.git'\nhint: Updates were rejected because the remote contains work you do not have\n",
-    });
-
-    const output = await stackCommand(["push"]);
-
-    expect(output).toContain("status: partial");
-    expect(output).toContain("failed to push some refs");
-  });
-
-  it("does not read an echoed commit subject as a partial failure", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stdout: "[api 1a2b3c4] fix: could not parse dates\n",
-      stderr: '✓ Added commit "fix: could not parse dates" to api\n',
-    });
-
-    const output = await stackCommand([
-      "add",
-      "-A",
-      "-m",
-      "fix: could not parse dates",
+    await stackCommand([
+      "sync",
+      "--update-base",
+      "--label",
+      "bug",
+      "--label",
+      "priority::high",
+      "--reviewer",
+      "alice",
     ]);
 
-    expect(output).toContain("status: ok");
+    expect(mockedGlabRaw).toHaveBeenCalledWith([
+      "stack",
+      "sync",
+      "--update-base",
+      "--label",
+      "bug",
+      "--label",
+      "priority::high",
+      "--reviewer",
+      "alice",
+    ]);
   });
 
-  it("rejects a zero navigation distance", async () => {
-    await expect(stackCommand(["up", "0"])).rejects.toThrow(/positive integer/);
-    await expect(stackCommand(["down", "0"])).rejects.toThrow(
-      /positive integer/,
-    );
-    expect(mockedGhRaw).not.toHaveBeenCalled();
-  });
-
-  it("reports an unrecognized view payload instead of throwing a TypeError", async () => {
-    mockedGhRaw.mockResolvedValue({
+  it("lists stack entries", async () => {
+    mockedGlabRaw.mockResolvedValue({
       exitCode: 0,
-      stdout: JSON.stringify({ trunk: "main" }),
+      stdout: "* feature-api\n  feature-model\n",
       stderr: "",
     });
 
-    await expect(stackCommand(["view"])).rejects.toMatchObject({
-      code: "UNKNOWN",
-      message: expect.stringContaining("Unexpected gh stack output"),
-    });
+    const output = await stackCommand(["list"]);
+
+    expect(mockedGlabRaw).toHaveBeenCalledWith(["stack", "list"]);
+    expect(output).toContain("feature-api");
+    expect(output).toContain("feature-model");
   });
 
-  it("tolerates a branch whose pr carries no state", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stderr: "",
-      stdout: JSON.stringify({
-        branches: [
-          {
-            name: "api",
-            isCurrent: true,
-            isMerged: false,
-            isQueued: false,
-            needsRebase: false,
-            pr: { number: 7 },
-          },
-        ],
-      }),
-    });
+  it("switches to another stack", async () => {
+    mockedGlabRaw.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
 
-    const output = await stackCommand(["view"]);
+    await stackCommand(["switch", "feature-api"]);
 
-    expect(output).toContain("trunk: null");
-    expect(output).toContain("api,true,local,false,7,null");
+    expect(mockedGlabRaw).toHaveBeenCalledWith([
+      "stack",
+      "switch",
+      "feature-api",
+    ]);
   });
 
-  it("does not report upstream warnings as clean success", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stdout: "",
-      stderr:
-        "⚠ the base branch uses a merge queue; ignoring the merge method\n",
-    });
+  it.each(["next", "prev", "first", "last"])(
+    "navigates with %s",
+    async (nav) => {
+      mockedGlabRaw.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
 
-    const output = await stackCommand(["merge", "42"]);
+      await stackCommand([nav]);
 
-    expect(output).toContain("status: warning");
+      expect(mockedGlabRaw).toHaveBeenCalledWith(["stack", nav]);
+    },
+  );
+
+  it.each(["move", "reorder"])(
+    "rejects the interactive %s form before invoking glab",
+    async (interactive) => {
+      await expect(stackCommand([interactive])).rejects.toThrow(
+        /interactive fuzzy finder/,
+      );
+      expect(mockedGlabRaw).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects an unrecognized subcommand", async () => {
+    await expect(stackCommand(["bogus"])).rejects.toThrow(/Unknown/);
   });
 
-  it("preserves stack exit codes and recovery guidance", async () => {
-    mockedGhRaw.mockResolvedValue({
+  it("rejects an unknown flag", async () => {
+    await expect(stackCommand(["list", "--short"])).rejects.toThrow(
+      /unknown flag/,
+    );
+    expect(mockedGlabRaw).not.toHaveBeenCalled();
+  });
+
+  it("preserves the upstream exit code and reports diagnostics", async () => {
+    mockedGlabRaw.mockResolvedValue({
       exitCode: 3,
       stdout: "",
       stderr: "rebase conflict in src/a.ts\n",
     });
 
     try {
-      await stackCommand(["rebase"]);
+      await stackCommand(["sync"]);
       expect.fail("expected StackError");
     } catch (error) {
       expect(error).toBeInstanceOf(StackError);
       expect((error as StackError).exitCode).toBe(3);
-      expect((error as StackError).suggestions.join(" ")).toContain(
-        "--continue",
-      );
+      expect((error as StackError).message).toContain("rebase conflict");
     }
-  });
-
-  it("uses fresh-rebase guidance after sync restores a conflict", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 3,
-      stdout: "  Run `gh stack rebase` to resolve conflicts interactively.\n",
-      stderr:
-        "✗ Conflict detected rebasing api onto model\n✓ All branches restored\n",
-    });
-
-    try {
-      await stackCommand(["sync"]);
-      expect.fail("expected StackError");
-    } catch (error) {
-      expect(error).toMatchObject({
-        message: expect.stringContaining("All branches restored"),
-        suggestions: [expect.stringContaining("stack rebase`")],
-      });
-      expect((error as StackError).suggestions.join(" ")).not.toContain(
-        "--continue",
-      );
-    }
-  });
-
-  it("uses reconciliation guidance for checkout composition conflicts", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 3,
-      stdout: "Local: model <- api\nRemote: model <- ui\n",
-      stderr: "local stack composition differs from remote\n",
-    });
-
-    await expect(stackCommand(["checkout", "42"])).rejects.toMatchObject({
-      suggestions: [expect.stringContaining("unstack --local")],
-    });
-  });
-
-  it("accepts equals-form values that begin with a dash", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 0,
-      stdout: "",
-      stderr: "Created branch\n",
-    });
-
-    await stackCommand(["add", "--message=- fix API"]);
-
-    expect(mockedGhRaw).toHaveBeenCalledWith([
-      "stack",
-      "add",
-      "--message=- fix API",
-    ]);
-  });
-
-  it("suggests installing a missing extension", async () => {
-    mockedGhRaw.mockResolvedValue({
-      exitCode: 1,
-      stdout: "",
-      stderr: 'unknown command "stack" for "gh"\n',
-    });
-
-    await expect(stackCommand(["view"])).rejects.toMatchObject({
-      suggestions: [
-        expect.stringContaining("gh extension install github/gh-stack"),
-      ],
-    });
-  });
-
-  it("rejects unknown flags and subcommands", async () => {
-    await expect(stackCommand(["view", "--short"])).rejects.toThrow(
-      /Unsupported/,
-    );
-    await expect(stackCommand(["switch"])).rejects.toThrow(/Unknown/);
   });
 });
