@@ -1,22 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { ISSUE_HELP } from "../src/commands/issue.js";
-import { PR_HELP } from "../src/commands/pr.js";
-import { RUN_HELP } from "../src/commands/run.js";
-import { WORKFLOW_HELP } from "../src/commands/workflow.js";
+import { MR_HELP } from "../src/commands/mr.js";
+import { CI_HELP } from "../src/commands/ci.js";
+import { SCHEDULE_HELP } from "../src/commands/schedule.js";
 import { RELEASE_HELP } from "../src/commands/release.js";
 import { REPO_HELP } from "../src/commands/repo.js";
 import { LABEL_HELP } from "../src/commands/label.js";
-import { PROJECT_HELP } from "../src/commands/project.js";
-import { SECRET_HELP } from "../src/commands/secret.js";
 import { VARIABLE_HELP } from "../src/commands/variable.js";
-import { SEARCH_HELP } from "../src/commands/search.js";
+import { SNIPPET_HELP } from "../src/commands/snippet.js";
+import { STACK_HELP } from "../src/commands/stack.js";
 import { API_HELP } from "../src/commands/api.js";
-import { GIST_HELP } from "../src/commands/gist.js";
+import { SETUP_HELP } from "../src/commands/setup.js";
 import { TOP_HELP } from "../src/cli.js";
 
 /**
  * Every HELP constant must contain an "examples:" section with at least 2
- * concrete usage examples that start with "gh-axi".
+ * concrete usage examples that start with "glab-axi".
  */
 function assertHelpHasExamples(name: string, help: string) {
   describe(`${name}`, () => {
@@ -24,11 +23,11 @@ function assertHelpHasExamples(name: string, help: string) {
       expect(help).toContain("examples:");
     });
 
-    it('has at least 2 examples starting with "gh-axi"', () => {
+    it('has at least 2 examples starting with "glab-axi"', () => {
       const examplesSection = help.slice(help.indexOf("examples:"));
       const exampleLines = examplesSection
         .split("\n")
-        .filter((line) => line.trim().startsWith("gh-axi"));
+        .filter((line) => line.trim().startsWith("glab-axi"));
       expect(exampleLines.length).toBeGreaterThanOrEqual(2);
     });
 
@@ -36,9 +35,9 @@ function assertHelpHasExamples(name: string, help: string) {
       const examplesSection = help.slice(help.indexOf("examples:"));
       const exampleLines = examplesSection
         .split("\n")
-        .filter((line) => line.trim().startsWith("gh-axi"));
+        .filter((line) => line.trim().startsWith("glab-axi"));
       for (const line of exampleLines) {
-        expect(line).toMatch(/^ {2}gh-axi/);
+        expect(line).toMatch(/^ {2}glab-axi/);
       }
     });
   });
@@ -47,59 +46,47 @@ function assertHelpHasExamples(name: string, help: string) {
 describe("Help output includes examples for every command family", () => {
   assertHelpHasExamples("TOP_HELP", TOP_HELP);
   assertHelpHasExamples("ISSUE_HELP", ISSUE_HELP);
-  assertHelpHasExamples("PR_HELP", PR_HELP);
-  assertHelpHasExamples("RUN_HELP", RUN_HELP);
-  assertHelpHasExamples("WORKFLOW_HELP", WORKFLOW_HELP);
+  assertHelpHasExamples("MR_HELP", MR_HELP);
+  assertHelpHasExamples("CI_HELP", CI_HELP);
+  assertHelpHasExamples("SCHEDULE_HELP", SCHEDULE_HELP);
   assertHelpHasExamples("RELEASE_HELP", RELEASE_HELP);
   assertHelpHasExamples("REPO_HELP", REPO_HELP);
   assertHelpHasExamples("LABEL_HELP", LABEL_HELP);
-  assertHelpHasExamples("PROJECT_HELP", PROJECT_HELP);
-  assertHelpHasExamples("SECRET_HELP", SECRET_HELP);
   assertHelpHasExamples("VARIABLE_HELP", VARIABLE_HELP);
-  assertHelpHasExamples("SEARCH_HELP", SEARCH_HELP);
+  assertHelpHasExamples("SNIPPET_HELP", SNIPPET_HELP);
+  assertHelpHasExamples("STACK_HELP", STACK_HELP);
   assertHelpHasExamples("API_HELP", API_HELP);
-  assertHelpHasExamples("GIST_HELP", GIST_HELP);
+  assertHelpHasExamples("SETUP_HELP", SETUP_HELP);
 });
 
 describe("--body-file discoverability", () => {
   it("documents --body-file in body-accepting command help", () => {
     expect(ISSUE_HELP).toContain("--body-file <path>");
-    expect(PR_HELP).toContain("--body-file <path>");
+    expect(MR_HELP).toContain("--body-file <path>");
     expect(RELEASE_HELP).toContain("--body-file");
   });
 });
 
-describe("GIST_HELP subcommands", () => {
-  // Pin the subcommand count and names so a change that adds/removes gist
-  // subcommands turns this into a visible test failure rather than a silent
-  // doc discrepancy. With edit + rename merged the gist family is complete at
-  // seven subcommands.
-  it("declares exactly 7 subcommands", () => {
-    expect(GIST_HELP).toContain("subcommands[7]:");
+describe("SNIPPET_HELP subcommands", () => {
+  it("declares exactly 5 subcommands", () => {
+    expect(SNIPPET_HELP).toContain("subcommands[5]:");
   });
 
-  it("names all seven subcommands: list, view, edit, rename, create, delete, clone", () => {
-    // The names appear on the indented line after "subcommands[7]:".
-    const lines = GIST_HELP.split("\n");
-    const headerIdx = lines.findIndex((l) => l.includes("subcommands[7]:"));
+  it("names all five subcommands: list, view, create, edit, delete", () => {
+    const lines = SNIPPET_HELP.split("\n");
+    const headerIdx = lines.findIndex((l) => l.includes("subcommands[5]:"));
     expect(headerIdx).toBeGreaterThan(-1);
     const namesCombined = lines.slice(headerIdx, headerIdx + 2).join(" ");
     expect(namesCombined).toContain("list");
     expect(namesCombined).toContain("view");
-    expect(namesCombined).toContain("edit");
-    expect(namesCombined).toContain("rename");
     expect(namesCombined).toContain("create");
+    expect(namesCombined).toContain("edit");
     expect(namesCombined).toContain("delete");
-    expect(namesCombined).toContain("clone");
   });
 });
 
-describe("secret --env discoverability", () => {
-  it("documents the --env/-e environment scope in secret help", () => {
-    expect(SECRET_HELP).toContain("--env/-e <environment>");
-  });
-
-  it("shows an env-scoped example in secret help", () => {
-    expect(SECRET_HELP).toContain("--env production");
+describe("variable --scope discoverability", () => {
+  it("documents the --scope environment flag in variable help", () => {
+    expect(VARIABLE_HELP).toContain("--scope <environment>");
   });
 });

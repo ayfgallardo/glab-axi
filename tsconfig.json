@@ -12,16 +12,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*.ts", "bin/**/*.ts"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "test",
-    "src/commands/api.ts",
-    "src/commands/gist.ts",
-    "src/commands/project.ts",
-    "src/commands/search.ts",
-    "src/commands/setup.ts",
-    "src/commands/stack.ts",
-    "src/totals.ts"
-  ]
+  "exclude": ["node_modules", "dist", "test"]
 }

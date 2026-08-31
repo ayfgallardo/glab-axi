@@ -13,42 +13,21 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cli = join(repoRoot, "bin", "glab-axi.ts");
-const fakeGh = fileURLToPath(
-  new URL("../fixtures/stateful-gh.mjs", import.meta.url),
+const fakeGlab = fileURLToPath(
+  new URL("../fixtures/stateful-glab.mjs", import.meta.url),
 );
 
 type FakeState = {
-  latestTag: string;
-  fallbackLatestTag: string;
   releases: Array<{
-    id: number;
     tag_name: string;
     name: string;
-    prerelease: boolean;
-    draft: boolean;
+    description: string | null;
   }>;
 };
 
 function initialState(): FakeState {
   return {
-    latestTag: "v0.9.0",
-    fallbackLatestTag: "v0.9.0",
-    releases: [
-      {
-        id: 1,
-        tag_name: "v1.0.0",
-        name: "Version 1 prerelease",
-        prerelease: true,
-        draft: false,
-      },
-      {
-        id: 2,
-        tag_name: "v0.9.0",
-        name: "Version 0.9",
-        prerelease: false,
-        draft: false,
-      },
-    ],
+    releases: [{ tag_name: "v1.0.0", name: "Version 1", description: null }],
   };
 }
 
@@ -58,15 +37,15 @@ describe("CLI release and API state round-trips", () => {
   let env: NodeJS.ProcessEnv;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "gh-axi-stateful-gh-"));
+    dir = mkdtempSync(join(tmpdir(), "glab-axi-stateful-glab-"));
     stateFile = join(dir, "state.json");
     writeFileSync(stateFile, JSON.stringify(initialState()), "utf8");
-    const fakeBin = join(dir, "gh");
-    copyFileSync(fakeGh, fakeBin);
+    const fakeBin = join(dir, "glab");
+    copyFileSync(fakeGlab, fakeBin);
     chmodSync(fakeBin, 0o755);
     env = {
       ...process.env,
-      GH_AXI_FAKE_STATE: stateFile,
+      GLAB_AXI_FAKE_STATE: stateFile,
       PATH: `${dir}${delimiter}${process.env.PATH ?? ""}`,
     };
   });
@@ -78,56 +57,39 @@ describe("CLI release and API state round-trips", () => {
   function runCli(...args: string[]): string {
     const result = spawnSync(
       process.execPath,
-      ["--import", "tsx", cli, ...args, "-R", "octo/repo"],
+      ["--import", "tsx", cli, ...args, "-R", "group/project"],
       { cwd: repoRoot, encoding: "utf8", env },
     );
     expect(result.status, result.stderr || result.stdout).toBe(0);
     return result.stdout;
   }
 
-  function readRelease(tag = "v1.0.0"): string {
-    return runCli("api", `/repos/octo/repo/releases/tags/${tag}`);
+  function readReleaseViaApi(): string {
+    return runCli("api", "projects/:id/releases/v1.0.0");
   }
 
-  function readLatest(): string {
-    return runCli("api", "/repos/octo/repo/releases/latest");
-  }
+  it("persists a release edit and reads it back via release view", () => {
+    runCli("release", "edit", "v1.0.0", "--title", "Renamed via CLI");
 
-  it("promotes a prerelease and reads it back as repository latest", () => {
-    runCli("release", "edit", "v1.0.0", "--prerelease=false", "--latest");
-
-    expect(readRelease()).toContain("prerelease: false");
-    expect(readLatest()).toContain("tag_name: v1.0.0");
-  });
-
-  it("demotes latest and reads back the persisted latest release", () => {
-    runCli("release", "edit", "v1.0.0", "--prerelease=false", "--latest");
-    runCli("release", "edit", "v1.0.0", "--latest=false");
-
-    expect(readRelease()).toContain("prerelease: false");
-    expect(readLatest()).toContain("tag_name: v0.9.0");
-  });
-
-  it("sets prerelease true and reads back the persisted release", () => {
-    runCli("release", "edit", "v1.0.0", "--prerelease=false");
-    runCli("release", "edit", "v1.0.0", "--prerelease");
-
-    expect(readRelease()).toContain("prerelease: true");
+    const view = runCli("release", "view", "v1.0.0");
+    expect(view).toContain("name: Renamed via CLI");
   });
 
   it("persists an API PATCH for a subsequent API GET", () => {
     runCli(
       "api",
       "PATCH",
-      "/repos/octo/repo/releases/1",
+      "projects/:id/releases/v1.0.0",
       "--field",
-      "name=Version 1 stable",
-      "--field",
-      "prerelease=false",
+      "name=Renamed via API",
     );
 
-    const release = runCli("api", "/repos/octo/repo/releases/1");
-    expect(release).toContain("name: Version 1 stable");
-    expect(release).toContain("prerelease: false");
+    expect(readReleaseViaApi()).toContain("name: Renamed via API");
+  });
+
+  it("persists release edit notes readable through the raw API", () => {
+    runCli("release", "edit", "v1.0.0", "--body", "updated notes");
+
+    expect(readReleaseViaApi()).toContain("description: updated notes");
   });
 });

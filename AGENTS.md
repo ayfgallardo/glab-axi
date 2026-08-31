@@ -6,14 +6,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Port status: gh-axi → glab-axi
 
-This repository is a port of gh-axi 0.1.35 (a `gh` wrapper) to `glab`. The core layer is ported; the command families are not yet.
+This repository is a **complete** port of gh-axi 0.1.35 (a `gh` wrapper) to `glab`. Every command family is ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/issue.ts`, `src/commands/mr.ts`, `src/commands/ci.ts`, `src/commands/schedule.ts`, `src/commands/repo.ts`, `src/commands/label.ts`, `src/commands/release.ts`, `src/commands/variable.ts`, `src/commands/snippet.ts`, `src/commands/stack.ts`, `src/commands/api.ts`, `src/commands/setup.ts`, `src/commands/home.ts`, `src/skill.ts`, and every domain of `src/suggestions.ts`. `tsconfig.json` and `vitest.config.ts` carry no exclusions any more — the port-in-progress quarantine mechanism (a `NOT_PORTED_YET` suite list plus matching `tsconfig` file exclusions) was fully retired once the last lot (snippet/stack/api/setup) landed.
 
-Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/issue.ts`, `src/commands/mr.ts`, `src/commands/ci.ts`, `src/commands/schedule.ts`, `src/commands/repo.ts`, `src/commands/label.ts`, `src/commands/release.ts`, `src/commands/variable.ts`, `src/commands/home.ts`, and the `issue`, `mr`, `ci`, `schedule`, `repo`, `label`, `release`, `variable` and `home` entries of `src/suggestions.ts`. `src/commands/secret.ts` no longer exists — GitLab has no `secret` resource, and its stdin-only value discipline was folded into `variable.ts`'s `set` (see "Variables" below).
-Not yet ported: the rest of `src/commands/` (`snippet`, `stack`, `api`, `setup`, plus the still-gh-shaped `gist.ts`, `project.ts`, `search.ts`) plus `src/totals.ts`, `src/gistSelector.ts` and their domains of `src/suggestions.ts`. Every unported command family routes to an inline stub in `cli.ts` that throws `not ported yet`.
+Three gh-era files were retired rather than ported, each for a reason with no straight GitLab equivalent, not for lack of effort:
 
-The unported gh modules are held out of the graph so build and test stay green: `tsconfig.json` excludes them file by file (alongside `src/totals.ts`), and `vitest.config.ts` carries a commented `NOT_PORTED_YET` list naming the lot that reclaims each suite. **Each port lot removes its own entry from both lists** — `describe.skip` is not an option, because a suite whose import fails errors before the skip is evaluated.
+- `src/commands/secret.ts` — GitLab has no `secret` resource; folded into `variable.ts`'s `set` (see "Variables" below).
+- `src/commands/project.ts` and `src/commands/search.ts` — orphaned baseline-import files, never wired into `cli.ts`'s `COMMANDS`/`COMMAND_NAMES` by any port lot. GitHub Projects (v2) has no GitLab CLI equivalent (`glab` has no `project` command at all); GitLab does expose a native `glab search` (BETA), but porting gh-axi's GitHub code/issue/pr/repo search surface onto it was never requested by any task in the port plan, so it was dropped rather than half-built. `test/cli.test.ts`'s "drops the GitHub-only command families" test pins this.
+- `src/totals.ts` — GitHub search-API-based filtered-count helper for `issue`/`pr` list, consumed nowhere once `mr.ts`/`issue.ts` were ported (GitLab's `X-Total` header approach is used instead, see `mr.ts` below); deleted as dead code along with `test/totals.test.ts`.
 
-Sections below tagged **[gh-era]** describe the unported modules and still say `gh`, `ghJson`, `nwo`, `GH_HOST`. Treat them as a description of the source material to port, never as a description of current behavior.
+`gist.ts`/`gistSelector.ts` were renamed to `snippet.ts`/`snippetSelector.ts` in place (`git mv`), not left as a parallel file — see "Snippets" below.
 
 ## glab invocation core (`src/glab.ts`, `src/context.ts`, `src/errors.ts`)
 
@@ -46,15 +47,15 @@ The SDK also appends a `"built-in":` section to the top-level `--help` output at
 ## Release process
 
 Releases are cut by release-please from conventional commit messages on `main`; merging the bot's release PR triggers `npm publish` via `.github/workflows/release-please.yml`.
-Do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json` (a guard workflow blocks PRs that touch them), and regenerate `skills/gh-axi/SKILL.md` with `pnpm run build:skill` instead of editing it directly.
+Do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json` (a guard workflow blocks PRs that touch them), and regenerate `skills/glab-axi/SKILL.md` with `pnpm run build:skill` instead of editing it directly.
 
 Every `pull_request` workflow (`ci.yml`, `guard-generated-files.yml`, `no-mistakes-required.yml`) uses `paths-ignore` for the release-please output set (`.release-please-manifest.json`, `CHANGELOG.md`, `package.json`) so release PRs create zero runs. Job-level bot `if`s stay as defense in depth. `test/release-ci-exclusions.test.ts` derives that set from `release-please-config.json` and fails if a workflow drifts; update the ignore lists when adding `extra-files` or changing `release-type`.
 
-## Installable skill (`src/skill.ts` → `skills/gh-axi/SKILL.md`)
+## Installable skill (`src/skill.ts` → `skills/glab-axi/SKILL.md`)
 
-**[gh-era]** Source material for a later port lot, not current behavior.
+The shipped skill stays a minimal stub and defers to the CLI for all actual guidance. glab-axi CLI output (`glab-axi` dashboard, `glab-axi --help`, `glab-axi <command> --help`) is the single source of truth. Never re-duplicate CLI-owned instructions into the skill; prefer a pointer over restated detail.
 
-The shipped skill stays a minimal stub and defers to the CLI for all actual guidance. gh-axi CLI output (`gh-axi` dashboard, `gh-axi --help`, `gh-axi <command> --help`) is the single source of truth. Never re-duplicate CLI-owned instructions into the skill; prefer a pointer over restated detail.
+Unlike gh-axi, glab-axi is **not currently published to npm**, so the skill body points at the `glab-axi` binary resolved from `PATH` (`glab-axi`, `glab-axi --help`, `glab-axi <command> --help`) rather than gh-axi's `npx -y gh-axi …` form — an `npx -y glab-axi` invocation would fail for every installer until (if ever) this fork is published. `pnpm run build:skill -- --check` fails if the committed file drifts from `createSkillMarkdown()`.
 
 ## Self-managed host support (`src/host.ts`, `src/cli.ts`)
 
@@ -72,26 +73,23 @@ GitLab has one variable resource, not gh's separate `secret`/`variable` split �
 
 Reads (`list`, `get`) go through `glabApiJson` against `projects/:id/variables[/:key]`; `get`'s optional `--scope` becomes a `filter[environment_scope]` query param. Mutations (`set`, `delete`) go through the `glab variable` subcommand.
 
-## User-scoped commands (`src/commands/gist.ts`, `src/commands/project.ts`)
+## Snippets (`src/commands/snippet.ts`, `src/snippetSelector.ts`)
 
-**[gh-era]** Source material for a later port lot, not current behavior.
+GitLab has two independent snippet resources — project-scoped (`projects/:id/snippets`, the default) and personal (`/snippets`, no project at all) — selected by a `--personal` flag rather than gh-axi's gist model (personal only). This mirrors gh-axi's user-scoped pattern: personal-snippet handlers must never forward `ctx` to `glabApiJson`/`glabApiText` (`ctx: effectiveCtx` is `undefined` whenever `--personal` is set), or GitLab would resolve `:id` against the wrong (or no) project. `list`/`create` reject `--personal`-less calls outside a repo context rather than silently defaulting, since there is no implicit project to target.
+`glab` ships **only** `snippet create` natively (verified via `glab snippet --help`/`glab snippet <sub> --help` on glab 1.97 — no `list`/`view`/`edit`/`delete`), so every subcommand except metadata-only paths goes through `glabApiJson`/`glabApiText` directly rather than a `glab snippet` subcommand; `create`/`edit` use the modern `files[0][file_path]`/`files[0][content]`/`files[0][action]` array form (`content`/`file_name` are deprecated per the GitLab API docs), and `view`'s raw content comes from the `…/raw` endpoint (`glabApiText`, since it answers plain text). gh-axi's `rename`/`clone` subcommands have no equivalent worth porting (no GitLab CLI clone-by-id verb, and file rename is just remove+add through `edit`) and were dropped — the family is `list|view|create|edit|delete`, five subcommands, not gh-axi's seven.
+`snippetIdFromSelector` (`src/snippetSelector.ts`) requires a **numeric** id (GitLab, unlike GitHub's alphanumeric gist ids) and accepts both URL shapes (`<host>/<namespace>/<project>/-/snippets/<id>` and `<host>/-/snippets/<id>`), taking the last path segment — both end in the id.
 
-Some GitHub API endpoints are user-scoped rather than repo-scoped: `gh api /gists` and `gh project` have no `--repo` flag and reject it if supplied.
-`gh.ts#buildArgs` auto-appends `--repo <nwo>` for any `RepoContext` whose `source !== "git"`, so passing ctx to `ghJson` from these handlers would inject a flag the CLI rejects.
-The fix is structural: these command functions omit the `ctx` parameter entirely (TypeScript accepts `(args: string[])` as `CommandFn` because fewer params are always assignable).
-`cli.ts`'s `withRepoContext` wrapper still resolves a context for other commands — it just never reaches `ghJson` in the user-scoped handlers.
-`gist.ts` follows this pattern; `project.ts` does too (though it additionally uses ctx?.owner for owner defaulting, it never forwards ctx to `ghJson`).
+## Stacked diffs (`src/commands/stack.ts`)
 
-## GitHub Projects (`gh project`) support (`src/commands/project.ts`)
+Unlike gh-axi's `stack` — a strict adapter over the third-party `github/gh-stack` **extension** — `glab stack` ships **natively** in glab 1.97 (EXPERIMENTAL upstream), so there is no extension-install guidance or "unknown command" detection to port; that whole failure mode from the gh-axi original no longer exists.
+The native subcommand set is smaller and differently shaped than gh-stack's (verified via `glab stack --help`/`glab stack <sub> --help`): `create <name>`, `save`, `amend`, `sync`, `list`, `switch <name>`, `next`, `prev`, `first`, `last`, plus two **interactive fuzzy-finder** commands, `move` and `reorder`, that have no non-interactive form and are rejected outright (AXI commands must never go interactive) rather than exposed. gh-stack's `view`/`init`/`add`/`checkout`/`push`/`submit`/`rebase`/`link`/`unstack`/`merge`/`up`/`down`/`top`/`bottom`/`trunk` have no native `glab stack` equivalent and were dropped rather than half-mapped — `next`/`prev`/`first`/`last` cover navigation, and `glab-axi mr merge` covers merging an individual stacked branch.
+`save`/`amend` **require** `-m`/`--message` (or `-d`/`--description`, the alias glab itself defines) — glab-axi never lets glab open `$EDITOR`, mirroring the gh-stack adapter's own rule. `sync` can prompt interactively to choose fork vs. upstream when the current repo is a fork (no flag suppresses this in glab 1.97); this is a **known reserve**, documented in `STACK_HELP`, not solved — avoid running `stack sync` from a forked checkout in an agent context.
+Stack commands stay cwd-bound exactly as before: `cli.ts#withLocalRepoContext` still rejects explicit repo flags and `GITLAB_REPO`, and `stackCommand` never receives a `RepoContext`. Successful output is commonly on stderr; both streams are captured and the exact upstream exit code is preserved through `StackError`, reaching the shell only via `cli.ts`'s `formatError` hook — do not swap `glabRaw` for `glabExec` or a generic `mapGlabError`.
 
-**[gh-era]** Source material for a later port lot, not current behavior.
+## Raw API passthrough (`src/commands/api.ts`)
 
-Unlike every other command family, `gh project` is owner-scoped (`--owner <login>`), not repo-scoped — it has no `--repo` flag at all.
-`project.ts`'s subfunctions therefore never pass `RepoContext` as the second arg to `ghJson` (matching `search.ts`'s existing pattern) — see "User-scoped commands" above for why.
-Instead, `resolveOwner()` defaults `--owner` to the current repo's owner (`ctx?.owner`) when the flag is omitted and a repo context is available, falling back to explicit `@me` otherwise because `gh project` requires an owner in non-interactive shells.
-`gh project` subcommands use `--format json` (whole-object dump), not the `--json field,field` selection style used by `issue`/`pr`/`release`; list-shaped responses come back wrapped (e.g. `{ projects: [...], totalCount }`), not as a bare array.
-Since Projects v2 items carry per-project custom fields (Status, Priority, ...) with no fixed schema, `item-list`/`field-list` render through bespoke functions (`renderProjectItems`/`renderProjectFields`) that flatten any unknown scalar top-level key into its own column, rather than a fixed `FieldDef` schema.
-Requires the `project` (or `read:project`) OAuth scope on the `gh` token; `src/errors.ts` matches gh's literal `"authentication token is missing required scopes [...]"` stderr (verified against a live token missing the scope) and maps it to `FORBIDDEN` with a `gh auth refresh -s <scope>` suggestion — this pattern is generic, not project-specific, so it also covers other gh features gated by OAuth scopes.
+`glab api` (verified via `glab api graphql --help`, which renders the shared `api` help since `graphql` is a magic endpoint value, not a distinct subcommand) accepts `-X/--method`, `-F/--field` (type-inferred), `-f/--raw-field` (string-only), `-H/--header`, `--input`, `--paginate` — the same surface gh-axi's `api.ts` already exposed, so the port keeps `[<method>] <path>` positional ergonomics (translated to `--method`) rather than adopting glab's flag-only form. Two gh-only flags have no glab equivalent and are rejected rather than silently ignored: `--jq` and `--template` (glab has neither; pipe to `jq` instead). `apiCommand` always passes an explicit `--method` rather than relying on glab's own default-method-flips-to-POST-when-fields-present behavior, so a caller typo in `--field` can never silently turn a `GET` into a `POST`.
+Response shaping drops gh-axi's curated `NOISY_KEYS` deny-list and repo/user-object collapsing: GitLab REST responses do not carry GitHub's volume of template/gravatar/permission URLs, so a plain string-length clamp (`--full` to disable) keeps output compact without guessing at GitLab-specific fields to strip without evidence.
 
 ## Repeatable flags (`src/args.ts`)
 
@@ -108,15 +106,6 @@ When a flag becomes repeatable, mark it `(repeatable)` in that command's `*_HELP
 `bin/glab-axi.ts` answers a bare `-v`/`-V`/`--version` via `tryFastPath` from `axi-sdk-js/fast-path` (a dependency-free SDK subpath) and only `await import("../src/cli.js")` otherwise, so the version path never loads the command graph (~31ms -> ~20ms, the node floor).
 This only works because `src/version.ts` is a LEAF module importing node builtins only - `cli.ts` imports `VERSION` from it, never the reverse. Adding any non-builtin import to `src/version.ts` silently undoes the speedup.
 `test/version-fast-path.test.ts` guards it deterministically with a `module.register()` load-hook trace (`test/fixtures/module-trace-*.mjs`) plus a negative control on `--help` (which probes `src/suggestions.js`, the heaviest module `cli.ts` still pulls in). Do not add a wall-clock timing assertion; it was proven flaky under CI contention.
-
-## Stacked PR support (`src/commands/stack.ts`)
-
-**[gh-era]** Source material for a later port lot, not current behavior.
-
-`gh-axi stack` is deliberately a strict adapter over the official `github/gh-stack` extension, not a second stack engine. Keep local metadata, Git mutation, rebase recovery, and Stacks API behavior upstream.
-Stack commands are cwd-bound. `cli.ts#withLocalRepoContext` rejects explicit repo flags and `GH_REPO`, strips the supported host flag, and never passes a `RepoContext` to `ghRaw`, because the extension does not accept `--repo`.
-Successful extension status is commonly written to stderr, and exits 2-10 represent actionable stack state. Preserve both streams and the exact `StackError.exitCode`, which reaches the shell only through `cli.ts`'s `formatError` hook; do not replace `ghRaw` with `ghExec` or generic `mapGhError`.
-Never expose an interactive path. Force `view --json`, `submit --auto`, and `merge --yes`; require arguments for commands that otherwise prompt. Keep `modify`, `switch`, `alias`, and `feedback` out unless upstream gains a useful headless interface.
 
 ## Issues (`src/commands/issue.ts`)
 
@@ -153,7 +142,7 @@ Deliberate divergences from gh-axi's `pr`, all GitLab vocabulary rather than Git
 - `pr revert` has no GitLab counterpart at MR level and is dropped.
 - Every rendered number is the `iid`, and the column is named `iid`, never `number`.
 - `--body`/`--body-file` are kept as the body channel (shared `takeBody`) even though GitLab calls the field `description`.
-- `mr list` reports no `of N total`: the true total lives in the `X-Total` response header, and `glab api --include` would break JSON parsing. `src/totals.ts` stays unported.
+- `mr list` reports no `of N total`: the true total lives in the `X-Total` response header, and `glab api --include` would break JSON parsing. gh-axi's `src/totals.ts` (a GitHub search-API filtered-count helper) has no consumer here and was deleted.
 
 `mr edit` maps onto `glab mr update`, which _replaces_ assignees and reviewers unless each name is prefixed: `--add-*` becomes `+name` and `--remove-*` becomes `!name` (`!`, not `-`, so the value is never parsed as a flag).
 

@@ -5,7 +5,7 @@ describe("getSuggestions", () => {
   it("returns home suggestions", () => {
     const lines = getSuggestions({ domain: "home", action: "home" });
     expect(lines.length).toBeGreaterThan(0);
-    expect(lines.some((l) => l.includes("issue") || l.includes("pr"))).toBe(
+    expect(lines.some((l) => l.includes("issue") || l.includes("mr"))).toBe(
       true,
     );
   });
@@ -55,12 +55,12 @@ describe("getSuggestions", () => {
       domain: "issue",
       action: "list",
       isEmpty: false,
-      repo: { owner: "cli", name: "cli", nwo: "cli/cli", source: "flag" },
+      repo: { fullPath: "group/project", source: "flag" },
     });
-    expect(lines.every((l) => l.includes("-R cli/cli"))).toBe(true);
-    expect(lines.every((l) => !l.includes("gh-axi -R"))).toBe(true);
+    expect(lines.every((l) => l.includes("-R group/project"))).toBe(true);
+    expect(lines.every((l) => !l.includes("glab-axi -R"))).toBe(true);
     expect(lines).toContain(
-      "Run `gh-axi issue view <number> -R cli/cli` to view details",
+      "Run `glab-axi issue view <iid> -R group/project` to view details",
     );
   });
 
@@ -70,17 +70,15 @@ describe("getSuggestions", () => {
       action: "list",
       isEmpty: false,
       repo: {
-        owner: "cli",
-        name: "cli",
-        nwo: "cli/cli",
+        fullPath: "group/project",
         source: "flag",
-        host: { value: "git.example.com", source: "flag" },
+        host: { value: "git.geofoncier.fr", source: "flag" },
       },
     });
 
     expect(lines).toEqual([
-      "Run `gh-axi issue view <number> -R cli/cli --hostname git.example.com` to view details",
-      'Run `gh-axi issue create --title "..." --body-file <path> -R cli/cli --hostname git.example.com` to create',
+      "Run `glab-axi issue view <iid> -R group/project --hostname git.geofoncier.fr` to view details",
+      'Run `glab-axi issue create --title "..." --body-file <path> -R group/project --hostname git.geofoncier.fr` to create',
     ]);
   });
 
@@ -89,7 +87,7 @@ describe("getSuggestions", () => {
       domain: "issue",
       action: "list",
       isEmpty: false,
-      host: { value: "git.example.com", source: "env" },
+      host: { value: "git.geofoncier.fr", source: "env" },
     });
 
     expect(lines.every((l) => !l.includes("--hostname"))).toBe(true);
@@ -100,7 +98,7 @@ describe("getSuggestions", () => {
       domain: "issue",
       action: "list",
       isEmpty: false,
-      host: { value: "github.com", source: "flag" },
+      host: { value: "gitlab.com", source: "flag" },
     });
 
     expect(lines.every((l) => !l.includes("--hostname"))).toBe(true);
@@ -108,7 +106,7 @@ describe("getSuggestions", () => {
 
   it("carries host-only CLI context into suggestions", async () => {
     const lines = await withSuggestionHost(
-      { value: "git.example.com", source: "flag" },
+      { value: "git.geofoncier.fr", source: "flag" },
       async () =>
         getSuggestions({
           domain: "issue",
@@ -118,7 +116,7 @@ describe("getSuggestions", () => {
     );
 
     expect(lines).toContain(
-      "Run `gh-axi issue view <number> --hostname git.example.com` to view details",
+      "Run `glab-axi issue view <iid> --hostname git.geofoncier.fr` to view details",
     );
   });
 
@@ -127,52 +125,13 @@ describe("getSuggestions", () => {
       domain: "issue",
       action: "list",
       isEmpty: false,
-      repo: { owner: "cli", name: "cli", nwo: "cli/cli", source: "git" },
+      repo: { fullPath: "group/project", source: "git" },
     });
     expect(lines.every((l) => !l.includes("-R"))).toBe(true);
   });
 
-  it("places explicit repo flags after secret commands", () => {
-    const repo = {
-      owner: "cli",
-      name: "cli",
-      nwo: "cli/cli",
-      source: "flag" as const,
-    };
-
-    const lines = [
-      ...getSuggestions({
-        domain: "secret",
-        action: "list",
-        isEmpty: false,
-        repo,
-      }),
-      ...getSuggestions({
-        domain: "secret",
-        action: "list",
-        isEmpty: true,
-        repo,
-      }),
-      ...getSuggestions({ domain: "secret", action: "set", repo }),
-      ...getSuggestions({ domain: "secret", action: "delete", repo }),
-    ];
-
-    expect(lines).toEqual([
-      'Run `echo -n "<value>" | gh-axi secret set <name> -R cli/cli` to add or update a secret',
-      'Run `echo -n "<value>" | gh-axi secret set <name> -R cli/cli` to add a secret',
-      "Run `gh-axi secret list -R cli/cli` to see all secrets",
-      "Run `gh-axi secret list -R cli/cli` to see remaining secrets",
-    ]);
-    expect(lines.every((l) => !l.includes("gh-axi -R"))).toBe(true);
-  });
-
   it("places explicit repo flags after variable commands", () => {
-    const repo = {
-      owner: "cli",
-      name: "cli",
-      nwo: "cli/cli",
-      source: "flag" as const,
-    };
+    const repo = { fullPath: "group/project", source: "flag" as const };
 
     const lines = [
       ...getSuggestions({
@@ -192,27 +151,36 @@ describe("getSuggestions", () => {
     ];
 
     expect(lines).toEqual([
-      "Run `gh-axi variable set <name> --body <value> -R cli/cli` to add or update a variable",
-      "Run `gh-axi variable set <name> --body <value> -R cli/cli` to add a variable",
-      "Run `gh-axi variable list -R cli/cli` to see all variables",
-      "Run `gh-axi variable list -R cli/cli` to see remaining variables",
+      'Run `echo -n "<value>" | glab-axi variable set <name> -R group/project` to add or update a variable',
+      'Run `echo -n "<value>" | glab-axi variable set <name> -R group/project` to add a variable',
+      "Run `glab-axi variable list -R group/project` to see all variables",
+      "Run `glab-axi variable list -R group/project` to see remaining variables",
     ]);
-    expect(lines.every((l) => !l.includes("gh-axi -R"))).toBe(true);
+    expect(lines.every((l) => !l.includes("glab-axi -R"))).toBe(true);
   });
 
-  it("returns PR merge suggestions", () => {
-    const lines = getSuggestions({ domain: "pr", action: "merge", id: 10 });
-    expect(lines.some((l) => l.includes("revert"))).toBe(true);
-  });
-
-  it("returns run view suggestions for in-progress", () => {
-    const lines = getSuggestions({
-      domain: "run",
-      action: "view",
-      state: "in_progress",
-      id: 123,
+  it("returns snippet list and view suggestions", () => {
+    const listed = getSuggestions({
+      domain: "snippet",
+      action: "list",
+      isEmpty: false,
     });
-    expect(lines.some((l) => l.includes("watch 123"))).toBe(true);
-    expect(lines.some((l) => l.includes("cancel 123"))).toBe(true);
+    expect(listed.some((l) => l.includes("snippet view"))).toBe(true);
+
+    const viewed = getSuggestions({
+      domain: "snippet",
+      action: "view",
+      id: 42,
+    });
+    expect(viewed.some((l) => l.includes("view 42 --files"))).toBe(true);
+  });
+
+  it("returns no suggestions for api and stack", () => {
+    expect(getSuggestions({ domain: "api", action: "call" })).toEqual([]);
+    expect(getSuggestions({ domain: "stack", action: "sync" })).toEqual([]);
+  });
+
+  it("returns an empty list for an unrecognized domain/action", () => {
+    expect(getSuggestions({ domain: "bogus", action: "bogus" })).toEqual([]);
   });
 });

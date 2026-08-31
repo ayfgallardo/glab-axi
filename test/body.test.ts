@@ -6,7 +6,7 @@ import { cleanBody, takeBody, truncateBody } from "../src/body.js";
 import { AxiError } from "../src/errors.js";
 
 function withTempDir<T>(fn: (dir: string) => T): T {
-  const dir = mkdtempSync(join(tmpdir(), "gh-axi-body-"));
+  const dir = mkdtempSync(join(tmpdir(), "glab-axi-body-"));
   try {
     return fn(dir);
   } finally {

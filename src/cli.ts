@@ -13,6 +13,10 @@ import { repoCommand, REPO_HELP } from "./commands/repo.js";
 import { labelCommand, LABEL_HELP } from "./commands/label.js";
 import { releaseCommand, RELEASE_HELP } from "./commands/release.js";
 import { variableCommand, VARIABLE_HELP } from "./commands/variable.js";
+import { snippetCommand, SNIPPET_HELP } from "./commands/snippet.js";
+import { stackCommand, STACK_HELP } from "./commands/stack.js";
+import { apiCommand, API_HELP } from "./commands/api.js";
+import { setupCommand, SETUP_HELP } from "./commands/setup.js";
 import { homeCommand } from "./commands/home.js";
 
 export const DESCRIPTION =
@@ -65,6 +69,10 @@ const COMMAND_HELP: Record<string, string> = {
   label: LABEL_HELP,
   release: RELEASE_HELP,
   variable: VARIABLE_HELP,
+  snippet: SNIPPET_HELP,
+  stack: STACK_HELP,
+  api: API_HELP,
+  setup: SETUP_HELP,
 };
 
 type HostOnlyContext = { host: HostContext };
@@ -72,24 +80,19 @@ type CliContext = RepoContext | HostOnlyContext;
 type CommandFn = (args: string[], ctx?: RepoContext) => Promise<string>;
 type WrappedCommandFn = (args: string[], ctx?: CliContext) => Promise<string>;
 
-// Placeholder until each command family is ported; one lot replaces one entry.
-const notPorted = async (): Promise<string> => {
-  throw new AxiError("not ported yet", "UNKNOWN");
-};
-
 const COMMANDS: Record<string, WrappedCommandFn> = {
   issue: withRepoContext(issueCommand),
   mr: withRepoContext(mrCommand),
   ci: withRepoContext(ciCommand),
   schedule: withRepoContext(scheduleCommand),
-  snippet: withRepoContext(notPorted),
+  snippet: withRepoContext(snippetCommand),
   label: withRepoContext(labelCommand),
   release: withRepoContext(releaseCommand),
   repo: withRepoContext(repoCommand),
   variable: withRepoContext(variableCommand),
-  stack: withLocalRepoContext(notPorted),
-  api: withRepoContext(notPorted),
-  setup: notPorted,
+  stack: withLocalRepoContext(stackCommand),
+  api: withRepoContext(apiCommand),
+  setup: (args) => setupCommand(args),
 };
 
 export async function main(options: MainOptions = {}): Promise<void> {

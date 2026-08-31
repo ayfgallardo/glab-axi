@@ -164,27 +164,10 @@ describe("main CLI", () => {
     expect(vi.mocked(runAxiCli).mock.calls[0]?.[0]).not.toHaveProperty("argv");
   });
 
-  it("reports every not-yet-ported command as such", async () => {
+  it("home renders the dashboard through the wired context", async () => {
     const options = await cliOptions();
     const ctx = { fullPath: "group/project", source: "git" };
 
-    const ported = [
-      "issue",
-      "mr",
-      "ci",
-      "schedule",
-      "repo",
-      "label",
-      "release",
-      "variable",
-    ];
-    for (const command of COMMAND_NAMES.filter(
-      (name) => !ported.includes(name),
-    )) {
-      await expect(options.commands[command](["list"], ctx)).rejects.toThrow(
-        "not ported yet",
-      );
-    }
     vi.mocked(glabApiJson).mockResolvedValue([]);
     const homeResult = await options.home([], ctx);
     expect(homeResult).toContain("assigned_mrs: 0 open");

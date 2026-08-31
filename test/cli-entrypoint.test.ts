@@ -81,16 +81,6 @@ describe("CLI entrypoint", () => {
     expect(process.exitCode).toBe(2);
   });
 
-  it("surfaces a not-yet-ported command as a structured error", async () => {
-    mockedExecFileSync.mockReturnValue("git@gitlab.com:group/project.git\n");
-    const output = createStdout();
-
-    await main({ argv: ["snippet", "list"], stdout: output.stdout });
-
-    expect(output.read()).toContain("not ported yet");
-    expect(mockedExecFile).not.toHaveBeenCalled();
-  });
-
   it("posts mr comment --body-file contents through the real runtime", async () => {
     const body = "review\n```ts\nconst ok = true;\n```\nIt's ready.";
     const dir = mkdtempSync(join(tmpdir(), "glab-axi-entrypoint-"));
