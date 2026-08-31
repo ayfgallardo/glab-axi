@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { encode } from "@toon-format/toon";
 import type { RepoContext } from "../context.js";
 import { glabApiJson, glabApiText, glabExec } from "../glab.js";
+import { isCancelNoop, isWatchTerminal } from "../pipelineStatus.js";
 import { AxiError } from "../errors.js";
 import {
   takeFlag,
@@ -55,18 +56,11 @@ interface Job {
 /** GitLab caps pagination at 100 items per request. */
 const PER_PAGE_MAX = 100;
 
-/** Pipeline statuses GitLab never leaves on its own. */
-const FINAL_STATUSES = ["success", "failed", "canceled", "skipped"];
-
 const LOG_TRUNCATE_LIMIT = 20000;
 
 /** The trailing `-R` that keeps a suggested command runnable outside this repo. */
 function repoArg(ctx?: RepoContext): string {
   return ctx && ctx.source !== "git" ? ` -R ${ctx.fullPath}` : "";
-}
-
-function isFinal(status: string | undefined): boolean {
-  return FINAL_STATUSES.includes(status ?? "");
 }
 
 /** Clamp a --limit to what GitLab will actually return in one page. */
@@ -406,7 +400,7 @@ async function ciWatch(args: string[], ctx?: RepoContext): Promise<string> {
 
   let waitedMs = 0;
   let pipeline = await fetchPipeline(id, ctx);
-  while (!isFinal(pipeline.status) && waitedMs < timeoutMs) {
+  while (!isWatchTerminal(pipeline.status) && waitedMs < timeoutMs) {
     await sleep(intervalMs);
     waitedMs += intervalMs;
     pipeline = await fetchPipeline(id, ctx);
@@ -417,7 +411,7 @@ async function ciWatch(args: string[], ctx?: RepoContext): Promise<string> {
     status: pipeline.status ?? "unknown",
     waited_seconds: waitedMs / 1000,
   };
-  if (!isFinal(pipeline.status)) {
+  if (!isWatchTerminal(pipeline.status)) {
     watch.timed_out = true;
   }
 
@@ -500,7 +494,7 @@ async function ciCancel(args: string[], ctx?: RepoContext): Promise<string> {
   const id = takeNumber(args, "pipeline");
 
   const pipeline = await fetchPipeline(id, ctx);
-  if (isFinal(pipeline.status)) {
+  if (isCancelNoop(pipeline.status)) {
     return renderOutput([
       encode({
         cancel: "already_finished",

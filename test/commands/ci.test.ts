@@ -330,6 +330,16 @@ describe("ciCommand", () => {
       expect(result).toContain("status: failed");
     });
 
+    it("stops on a manual gate instead of polling to the timeout", async () => {
+      mockedApi.mockResolvedValue(pipeline({ status: "manual" }));
+
+      const result = await ciCommand(["watch", "52377"], ctx);
+
+      expect(mockedApi).toHaveBeenCalledTimes(1);
+      expect(result).toContain("status: manual");
+      expect(result).not.toContain("timed_out");
+    });
+
     it("gives up at --timeout without failing", async () => {
       mockedApi.mockResolvedValue(pipeline({ status: "running" }));
 
@@ -410,6 +420,17 @@ describe("ciCommand", () => {
     it("cancels a running pipeline", async () => {
       mockedApi
         .mockResolvedValueOnce(pipeline({ status: "running" }))
+        .mockResolvedValueOnce(pipeline({ status: "canceled" }));
+
+      const result = await ciCommand(["cancel", "52377"], ctx);
+
+      expect(apiPathsOf()[1]).toBe("projects/:id/pipelines/52377/cancel");
+      expect(result).toContain("cancel: ok");
+    });
+
+    it("still cancels a pipeline parked on a manual gate", async () => {
+      mockedApi
+        .mockResolvedValueOnce(pipeline({ status: "manual" }))
         .mockResolvedValueOnce(pipeline({ status: "canceled" }));
 
       const result = await ciCommand(["cancel", "52377"], ctx);

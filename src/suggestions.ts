@@ -1,5 +1,6 @@
 import type { RepoContext } from "./context.js";
 import { DEFAULT_HOST, type HostContext } from "./host.js";
+import { isCancelNoop, isWatchTerminal } from "./pipelineStatus.js";
 
 interface SuggestionContext {
   domain: string;
@@ -310,14 +311,19 @@ const table: SuggestionEntry[] = [
     ],
   },
 
-  // CI status / view — the running pipeline can still be watched or canceled
+  // CI status / view — a pipeline still in flight can be canceled, and watched
+  // unless it is parked on a manual gate that will never clear on its own.
   {
     match: (c) =>
       ["status", "view"].includes(c.action) &&
       c.domain === "ci" &&
-      !["success", "failed", "canceled", "skipped"].includes(c.state ?? ""),
+      !isCancelNoop(c.state),
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} ci watch ${c.id}\` to wait until the pipeline finishes`,
+      ...(isWatchTerminal(c.state)
+        ? []
+        : [
+            `Run \`glab-axi${repoFlag(c)} ci watch ${c.id}\` to wait until the pipeline finishes`,
+          ]),
       `Run \`glab-axi${repoFlag(c)} ci cancel ${c.id}\` to cancel it`,
     ],
   },
