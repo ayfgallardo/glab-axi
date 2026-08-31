@@ -11,8 +11,6 @@ interface SuggestionContext {
   id?: string | number;
   repo?: RepoContext;
   host?: HostContext;
-  /** Resolved --owner for owner-scoped domains (e.g. project) */
-  owner?: string;
 }
 
 type SuggestionEntry = {
@@ -25,10 +23,6 @@ function repoFlag(ctx: SuggestionContext): string {
     return ` -R ${ctx.repo.fullPath}`;
   }
   return "";
-}
-
-function ownerFlag(ctx: SuggestionContext): string {
-  return ctx.owner ? ` --owner ${ctx.owner}` : "";
 }
 
 function normalizeRepoFlagLine(line: string): string {
@@ -517,85 +511,6 @@ const table: SuggestionEntry[] = [
     ],
   },
 
-  // Project list
-  {
-    match: (c) => c.domain === "project" && c.action === "list" && !c.isEmpty,
-    lines: (c) => [
-      `Run \`glab-axi project view <number>${ownerFlag(c)}\` to view details`,
-      `Run \`glab-axi project create --title "..."${ownerFlag(c)}\` to create a project`,
-    ],
-  },
-  {
-    match: (c) =>
-      c.domain === "project" && c.action === "list" && c.isEmpty === true,
-    lines: (c) => [
-      `Run \`glab-axi project create --title "..."${ownerFlag(c)}\` to create a project`,
-    ],
-  },
-
-  // Project create/edit/close/copy
-  {
-    match: (c) => c.domain === "project" && c.action === "create",
-    lines: (c) => [
-      `Run \`glab-axi project view ${c.id}${ownerFlag(c)}\` to see the new project`,
-      `Run \`glab-axi project item-add ${c.id} --url <issue-or-pr-url>${ownerFlag(c)}\` to add items`,
-    ],
-  },
-  {
-    match: (c) => c.domain === "project" && c.action === "edit",
-    lines: (c) => [
-      `Run \`glab-axi project view ${c.id}${ownerFlag(c)}\` to see the updated project`,
-    ],
-  },
-  {
-    match: (c) => c.domain === "project" && c.action === "close",
-    lines: (c) => [
-      `Run \`glab-axi project close ${c.id} --undo${ownerFlag(c)}\` to reopen`,
-    ],
-  },
-  {
-    match: (c) => c.domain === "project" && c.action === "copy",
-    lines: (c) => [
-      `Run \`glab-axi project view ${c.id}${ownerFlag(c)}\` to see the copied project`,
-    ],
-  },
-
-  // Project item-list / field-list
-  {
-    match: (c) => c.domain === "project" && c.action === "item-list",
-    lines: (c) => [
-      `Run \`glab-axi project item-add ${c.id} --url <issue-or-pr-url>${ownerFlag(c)}\` to add an item`,
-      `Run \`glab-axi project field-list ${c.id}${ownerFlag(c)}\` to see project fields`,
-    ],
-  },
-  {
-    match: (c) => c.domain === "project" && c.action === "field-list",
-    lines: () => [
-      `Run \`glab-axi project item-edit --id <item-id> --field-id <field-id> --project-id <project-id> --text "..."\` to set a field value`,
-    ],
-  },
-
-  // Project item-add/item-create/item-edit/item-archive/item-delete
-  {
-    match: (c) =>
-      c.domain === "project" && ["item-add", "item-create"].includes(c.action),
-    lines: (c) => [
-      `Run \`glab-axi project item-list ${c.id}${ownerFlag(c)}\` to see all items`,
-    ],
-  },
-  {
-    match: (c) => c.domain === "project" && c.action === "item-edit",
-    lines: () => [],
-  },
-  {
-    match: (c) =>
-      c.domain === "project" &&
-      ["item-archive", "item-delete"].includes(c.action),
-    lines: (c) => [
-      `Run \`glab-axi project item-list ${c.id}${ownerFlag(c)}\` to see remaining items`,
-    ],
-  },
-
   // Variable list
   {
     match: (c) => c.domain === "variable" && c.action === "list" && !c.isEmpty,
@@ -631,74 +546,62 @@ const table: SuggestionEntry[] = [
     ],
   },
 
-  // Gist list
+  // Snippet list
   {
-    match: (c) => c.domain === "gist" && c.action === "list" && !c.isEmpty,
+    match: (c) => c.domain === "snippet" && c.action === "list" && !c.isEmpty,
     lines: () => [
-      "Run `glab-axi gist view <id>` to view a gist's files and metadata",
-      "Run `glab-axi gist list --fields url,owner,created` to add extra fields",
+      "Run `glab-axi snippet view <id>` to view a snippet's files and metadata",
+      "Run `glab-axi snippet list --personal` to see personal snippets",
     ],
   },
   {
     match: (c) =>
-      c.domain === "gist" && c.action === "list" && c.isEmpty === true,
-    lines: () => ["Run `glab-axi api /gists` to see gist data via the raw API"],
-  },
-
-  // Gist view
-  {
-    match: (c) => c.domain === "gist" && c.action === "view",
+      c.domain === "snippet" && c.action === "list" && c.isEmpty === true,
     lines: (c) => [
-      `Run \`glab-axi gist view ${String(c.id)} --files\` to list file names only`,
-      `Run \`glab-axi gist list\` to see all your gists`,
+      `Run \`glab-axi${repoFlag(c)} snippet create --title "..." <file>\` to create a snippet`,
     ],
   },
 
-  // Gist edit
+  // Snippet view
   {
-    match: (c) => c.domain === "gist" && c.action === "edit",
+    match: (c) => c.domain === "snippet" && c.action === "view",
     lines: (c) => [
-      `Run \`glab-axi gist list\` to see all gists`,
-      `Run \`glab-axi gist rename ${c.id} <old> <new>\` to rename a file`,
+      `Run \`glab-axi snippet view ${String(c.id)} --files\` to list file names only`,
+      `Run \`glab-axi${repoFlag(c)} snippet list\` to see all snippets`,
     ],
   },
 
-  // Gist rename
+  // Snippet create
   {
-    match: (c) => c.domain === "gist" && c.action === "rename",
+    match: (c) => c.domain === "snippet" && c.action === "create",
+    lines: (c) => [`Run \`glab-axi snippet view ${String(c.id)}\` to see it`],
+  },
+
+  // Snippet edit
+  {
+    match: (c) => c.domain === "snippet" && c.action === "edit",
     lines: (c) => [
-      `Run \`glab-axi gist list\` to see all gists`,
-      `Run \`glab-axi gist edit ${c.id} --filename <name>\` to edit file content`,
+      `Run \`glab-axi snippet view ${String(c.id)}\` to see the updated snippet`,
     ],
   },
 
-  // Gist create
+  // Snippet delete
   {
-    match: (c) => c.domain === "gist" && c.action === "create",
-    lines: () => ["Run `glab-axi gist list` to see all your gists"],
-  },
-
-  // Gist delete
-  {
-    match: (c) => c.domain === "gist" && c.action === "delete",
-    lines: () => ["Run `glab-axi gist list` to see remaining gists"],
-  },
-
-  // Gist clone
-  {
-    match: (c) => c.domain === "gist" && c.action === "clone",
-    lines: () => ["Run `glab-axi gist list` to see your gists"],
-  },
-
-  // Search
-  {
-    match: (c) => c.domain === "search",
-    lines: () => [],
+    match: (c) => c.domain === "snippet" && c.action === "delete",
+    lines: (c) => [
+      `Run \`glab-axi${repoFlag(c)} snippet list\` to see remaining snippets`,
+    ],
   },
 
   // API
   {
     match: (c) => c.domain === "api",
+    lines: () => [],
+  },
+
+  // Stack
+  {
+    match: (c) => c.domain === "stack",
     lines: () => [],
   },
 ];
