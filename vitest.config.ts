@@ -17,7 +17,6 @@ const NOT_PORTED_YET = [
   "test/commands/secret.test.ts",
   "test/commands/stack.test.ts",
   "test/commands/variable.test.ts",
-  "test/commands/workflow.test.ts",
   "test/integration/**",
   "test/help-examples.test.ts",
   "test/totals.test.ts",

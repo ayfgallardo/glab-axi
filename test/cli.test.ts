@@ -24,6 +24,7 @@ import {
 } from "../src/cli.js";
 import { MR_HELP } from "../src/commands/mr.js";
 import { CI_HELP } from "../src/commands/ci.js";
+import { SCHEDULE_HELP } from "../src/commands/schedule.js";
 import { resolveRepo } from "../src/context.js";
 import { AxiError, StackError } from "../src/errors.js";
 import { encode } from "@toon-format/toon";
@@ -157,7 +158,7 @@ describe("main CLI", () => {
     const options = await cliOptions();
     const ctx = { fullPath: "group/project", source: "git" };
 
-    const ported = ["mr", "ci"];
+    const ported = ["mr", "ci", "schedule"];
     for (const command of COMMAND_NAMES.filter(
       (name) => !ported.includes(name),
     )) {
@@ -175,11 +176,13 @@ describe("main CLI", () => {
     expect(options.getCommandHelp("mr")).toBe(MR_HELP);
   });
 
-  it("routes ci to the ported command and exposes its help", async () => {
+  it("routes ci and schedule to their ported commands and exposes their help", async () => {
     const options = await cliOptions();
 
     expect(await options.commands.ci(["--help"])).toBe(CI_HELP);
     expect(options.getCommandHelp("ci")).toBe(CI_HELP);
+    expect(await options.commands.schedule(["--help"])).toBe(SCHEDULE_HELP);
+    expect(options.getCommandHelp("schedule")).toBe(SCHEDULE_HELP);
   });
 
   it("keeps stack commands cwd-bound", async () => {

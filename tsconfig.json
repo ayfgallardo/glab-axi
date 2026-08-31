@@ -29,7 +29,6 @@
     "src/commands/setup.ts",
     "src/commands/stack.ts",
     "src/commands/variable.ts",
-    "src/commands/workflow.ts",
     "src/totals.ts"
   ]
 }

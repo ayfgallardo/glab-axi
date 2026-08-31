@@ -369,37 +369,42 @@ const table: SuggestionEntry[] = [
     ],
   },
 
-  // Workflow list
+  // Schedule list
   {
-    match: (c) => c.domain === "workflow" && c.action === "list",
+    match: (c) => c.domain === "schedule" && c.action === "list" && !c.isEmpty,
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} workflow view <id>\` to view details`,
-      `Run \`glab-axi${repoFlag(c)} workflow run <id>\` to trigger a run`,
+      `Run \`glab-axi${repoFlag(c)} schedule view <id>\` to view details`,
+      `Run \`glab-axi${repoFlag(c)} schedule run <id>\` to run one now`,
     ],
   },
-
-  // Workflow view
-  {
-    match: (c) => c.domain === "workflow" && c.action === "view",
-    lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} workflow run ${c.id}\` to trigger`,
-    ],
-  },
-
-  // Workflow run
-  {
-    match: (c) => c.domain === "workflow" && c.action === "run",
-    lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} ci list\` to see the triggered pipeline`,
-    ],
-  },
-
-  // Workflow enable/disable
   {
     match: (c) =>
-      c.domain === "workflow" && ["enable", "disable"].includes(c.action),
+      c.domain === "schedule" && c.action === "list" && c.isEmpty === true,
+    lines: () => [],
+  },
+
+  // Schedule view
+  {
+    match: (c) => c.domain === "schedule" && c.action === "view",
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} workflow list\` to see all workflows`,
+      `Run \`glab-axi${repoFlag(c)} schedule run ${c.id}\` to run it now`,
+    ],
+  },
+
+  // Schedule run
+  {
+    match: (c) => c.domain === "schedule" && c.action === "run",
+    lines: (c) => [
+      `Run \`glab-axi${repoFlag(c)} ci list --source schedule\` to see the pipeline it started`,
+    ],
+  },
+
+  // Schedule enable/disable
+  {
+    match: (c) =>
+      c.domain === "schedule" && ["enable", "disable"].includes(c.action),
+    lines: (c) => [
+      `Run \`glab-axi${repoFlag(c)} schedule list\` to see all schedules`,
     ],
   },
 
