@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/glab.js", () => ({
   glabApiJson: vi.fn(),
+  glabApiJsonBody: vi.fn(),
   glabApiText: vi.fn(),
 }));
 vi.mock("../../src/stdin.js", () => ({
@@ -12,13 +13,14 @@ vi.mock("../../src/stdin.js", () => ({
   readStdin: vi.fn(async () => ""),
 }));
 
-import { glabApiJson, glabApiText } from "../../src/glab.js";
+import { glabApiJson, glabApiJsonBody, glabApiText } from "../../src/glab.js";
 import { isStdinTTY, readStdin } from "../../src/stdin.js";
 import { snippetCommand, SNIPPET_HELP } from "../../src/commands/snippet.js";
 import { AxiError } from "../../src/errors.js";
 import type { RepoContext } from "../../src/context.js";
 
 const mockedApiJson = vi.mocked(glabApiJson);
+const mockedApiJsonBody = vi.mocked(glabApiJsonBody);
 const mockedApiText = vi.mocked(glabApiText);
 const mockedReadStdin = vi.mocked(readStdin);
 const mockedIsStdinTTY = vi.mocked(isStdinTTY);
@@ -178,7 +180,7 @@ describe("snippetCommand", () => {
 
     it("creates a snippet from piped content via --filename", async () => {
       mockedReadStdin.mockResolvedValue("content");
-      mockedApiJson.mockResolvedValue({
+      mockedApiJsonBody.mockResolvedValue({
         id: 5,
         title: "x",
         description: null,
@@ -192,16 +194,15 @@ describe("snippetCommand", () => {
         ctx,
       );
 
-      expect(mockedApiJson).toHaveBeenCalledWith("projects/:id/snippets", {
-        ctx,
-        method: "POST",
-        fields: {
+      expect(mockedApiJsonBody).toHaveBeenCalledWith(
+        "projects/:id/snippets",
+        {
           title: "x",
           visibility: "private",
-          "files[0][file_path]": "hello.txt",
-          "files[0][content]": "content",
+          files: [{ file_path: "hello.txt", content: "content" }],
         },
-      });
+        { ctx, method: "POST" },
+      );
       expect(output).toContain("id: 5");
     });
 
@@ -233,7 +234,7 @@ describe("snippetCommand", () => {
       });
 
       it("attaches every --file, not just the first", async () => {
-        mockedApiJson.mockResolvedValue({
+        mockedApiJsonBody.mockResolvedValue({
           id: 6,
           title: "x",
           description: null,
@@ -247,22 +248,22 @@ describe("snippetCommand", () => {
           ctx,
         );
 
-        expect(mockedApiJson).toHaveBeenCalledWith("projects/:id/snippets", {
-          ctx,
-          method: "POST",
-          fields: {
+        expect(mockedApiJsonBody).toHaveBeenCalledWith(
+          "projects/:id/snippets",
+          {
             title: "x",
             visibility: "private",
-            "files[0][file_path]": "a.py",
-            "files[0][content]": "content a",
-            "files[1][file_path]": "b.py",
-            "files[1][content]": "content b",
+            files: [
+              { file_path: "a.py", content: "content a" },
+              { file_path: "b.py", content: "content b" },
+            ],
           },
-        });
+          { ctx, method: "POST" },
+        );
       });
 
       it("attaches every positional path, not just the first", async () => {
-        mockedApiJson.mockResolvedValue({
+        mockedApiJsonBody.mockResolvedValue({
           id: 7,
           title: "x",
           description: null,
@@ -273,18 +274,18 @@ describe("snippetCommand", () => {
 
         await snippetCommand(["create", "--title", "x", pathA, pathB], ctx);
 
-        expect(mockedApiJson).toHaveBeenCalledWith("projects/:id/snippets", {
-          ctx,
-          method: "POST",
-          fields: {
+        expect(mockedApiJsonBody).toHaveBeenCalledWith(
+          "projects/:id/snippets",
+          {
             title: "x",
             visibility: "private",
-            "files[0][file_path]": "a.py",
-            "files[0][content]": "content a",
-            "files[1][file_path]": "b.py",
-            "files[1][content]": "content b",
+            files: [
+              { file_path: "a.py", content: "content a" },
+              { file_path: "b.py", content: "content b" },
+            ],
           },
-        });
+          { ctx, method: "POST" },
+        );
       });
 
       it("rejects mixing positional paths with --file", async () => {
@@ -294,7 +295,7 @@ describe("snippetCommand", () => {
             ctx,
           ),
         ).rejects.toBeInstanceOf(AxiError);
-        expect(mockedApiJson).not.toHaveBeenCalled();
+        expect(mockedApiJsonBody).not.toHaveBeenCalled();
       });
     });
   });
@@ -313,18 +314,18 @@ describe("snippetCommand", () => {
     });
 
     it("updates metadata", async () => {
-      mockedApiJson.mockResolvedValue({});
+      mockedApiJsonBody.mockResolvedValue({});
 
       const output = await snippetCommand(
         ["edit", "42", "--title", "New title"],
         ctx,
       );
 
-      expect(mockedApiJson).toHaveBeenCalledWith("projects/:id/snippets/42", {
-        ctx,
-        method: "PUT",
-        fields: { title: "New title" },
-      });
+      expect(mockedApiJsonBody).toHaveBeenCalledWith(
+        "projects/:id/snippets/42",
+        { title: "New title" },
+        { ctx, method: "PUT" },
+      );
       expect(output).toContain("edited: ok");
     });
 
@@ -338,18 +339,32 @@ describe("snippetCommand", () => {
     });
 
     it("removes a file", async () => {
-      mockedApiJson.mockResolvedValue({});
+      mockedApiJsonBody.mockResolvedValue({});
 
       await snippetCommand(["edit", "42", "--remove", "old.txt"], ctx);
 
-      expect(mockedApiJson).toHaveBeenCalledWith("projects/:id/snippets/42", {
-        ctx,
-        method: "PUT",
-        fields: {
-          "files[0][file_path]": "old.txt",
-          "files[0][action]": "delete",
+      expect(mockedApiJsonBody).toHaveBeenCalledWith(
+        "projects/:id/snippets/42",
+        { files: [{ file_path: "old.txt", action: "delete" }] },
+        { ctx, method: "PUT" },
+      );
+    });
+
+    it("adds a file from piped stdin", async () => {
+      mockedReadStdin.mockResolvedValue("new content");
+      mockedApiJsonBody.mockResolvedValue({});
+
+      await snippetCommand(["edit", "42", "--add", "notes.md", "-"], ctx);
+
+      expect(mockedApiJsonBody).toHaveBeenCalledWith(
+        "projects/:id/snippets/42",
+        {
+          files: [
+            { file_path: "notes.md", content: "new content", action: "create" },
+          ],
         },
-      });
+        { ctx, method: "PUT" },
+      );
     });
   });
 

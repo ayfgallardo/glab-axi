@@ -1,6 +1,6 @@
 import { encode } from "@toon-format/toon";
 import type { RepoContext } from "../context.js";
-import { glabApiJson, glabApiText } from "../glab.js";
+import { glabApiJson, glabApiJsonBody, glabApiText } from "../glab.js";
 import { AxiError } from "../errors.js";
 import {
   takeFlag,
@@ -296,8 +296,7 @@ async function createSnippet(
     );
   }
 
-  const fields: Record<string, string> = { title, visibility };
-  if (description) fields.description = description;
+  const files: { file_path: string; content: string }[] = [];
 
   if (filename !== undefined) {
     if (isStdinTTY()) {
@@ -312,27 +311,25 @@ async function createSnippet(
     const content = await readRequiredStdin(
       `echo 'content' | glab-axi snippet create --filename <name> --title <text>`,
     );
-    fields["files[0][file_path]"] = filename;
-    fields["files[0][content]"] = content;
+    files.push({ file_path: filename, content });
   } else {
     // positionals and fileFlags are mutually exclusive (rejected above), so
     // exactly one of the two is the ordered list of paths to attach — every
     // one of them, not just the first (AGENTS.md "Repeatable flags": a
     // repeatable input collected in full must never be consumed partially).
     const paths = positionals.length > 0 ? positionals : fileFlags;
-    for (const [index, path] of paths.entries()) {
+    for (const path of paths) {
       const filePath = path.split("/").pop() ?? path;
       const content = await readFileContent(path);
-      fields[`files[${index}][file_path]`] = filePath;
-      fields[`files[${index}][content]`] = content;
+      files.push({ file_path: filePath, content });
     }
   }
 
-  const created = await glabApiJson<SnippetSummary>(basePath(personal), {
-    ctx: effectiveCtx,
-    method: "POST",
-    fields,
-  });
+  const created = await glabApiJsonBody<SnippetSummary>(
+    basePath(personal),
+    { title, visibility, ...(description ? { description } : {}), files },
+    { ctx: effectiveCtx, method: "POST" },
+  );
 
   const suggestions = getSuggestions({
     domain: "snippet",
@@ -437,13 +434,14 @@ async function editSnippet(args: string[], ctx?: RepoContext): Promise<string> {
   const effectiveCtx = personal ? undefined : ctx;
   const path = `${basePath(personal)}/${snippetId}`;
 
-  const fields: Record<string, string> = {};
-  if (titleFlag !== undefined) fields.title = titleFlag;
-  if (descFlag !== undefined) fields.description = descFlag;
-  if (visibilityFlag !== undefined) fields.visibility = visibilityFlag;
+  const body: Record<string, unknown> = {};
+  if (titleFlag !== undefined) body.title = titleFlag;
+  if (descFlag !== undefined) body.description = descFlag;
+  if (visibilityFlag !== undefined) body.visibility = visibilityFlag;
 
   if (addFlag !== undefined) {
     let content: string;
+    let filePath: string;
     if (wantsStdin) {
       if (isStdinTTY()) {
         throw new AxiError(
@@ -457,22 +455,17 @@ async function editSnippet(args: string[], ctx?: RepoContext): Promise<string> {
       content = await readRequiredStdin(
         "Example: echo 'content' | glab-axi snippet edit <id> --add <name> -",
       );
-      fields["files[0][file_path]"] = addFlag;
-      fields["files[0][content]"] = content;
-      fields["files[0][action]"] = "create";
+      filePath = addFlag;
     } else {
       content = await readFileContent(addFlag);
-      const filePath = addFlag.split("/").pop() ?? addFlag;
-      fields["files[0][file_path]"] = filePath;
-      fields["files[0][content]"] = content;
-      fields["files[0][action]"] = "create";
+      filePath = addFlag.split("/").pop() ?? addFlag;
     }
+    body.files = [{ file_path: filePath, content, action: "create" }];
   } else if (removeFlag !== undefined) {
-    fields["files[0][file_path]"] = removeFlag;
-    fields["files[0][action]"] = "delete";
+    body.files = [{ file_path: removeFlag, action: "delete" }];
   }
 
-  await glabApiJson(path, { ctx: effectiveCtx, method: "PUT", fields });
+  await glabApiJsonBody(path, body, { ctx: effectiveCtx, method: "PUT" });
 
   const suggestions = getSuggestions({
     domain: "snippet",

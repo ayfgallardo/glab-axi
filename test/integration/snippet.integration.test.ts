@@ -29,7 +29,7 @@ import {
   beforeEach,
   vi,
 } from "vitest";
-import { glabApiJson, glabApiText } from "../../src/glab.js";
+import { glabApiJson, glabApiJsonBody, glabApiText } from "../../src/glab.js";
 import { snippetCommand } from "../../src/commands/snippet.js";
 import { isStdinTTY, readStdin } from "../../src/stdin.js";
 import type { RepoContext } from "../../src/context.js";
@@ -52,16 +52,15 @@ interface SnippetResponse {
 }
 
 async function createSnippet(ctx: RepoContext): Promise<number> {
-  const created = await glabApiJson<SnippetResponse>("projects/:id/snippets", {
-    ctx,
-    method: "POST",
-    fields: {
+  const created = await glabApiJsonBody<SnippetResponse>(
+    "projects/:id/snippets",
+    {
       title: "glab-axi integration test scratch",
       visibility: "private",
-      "files[0][file_path]": "notes.txt",
-      "files[0][content]": "original content",
+      files: [{ file_path: "notes.txt", content: "original content" }],
     },
-  });
+    { ctx, method: "POST" },
+  );
   return created.id;
 }
 

@@ -176,6 +176,39 @@ export async function glabApiText(
   return result.stdout;
 }
 
+export interface ApiBodyOptions {
+  ctx?: RepoContext;
+  method?: string;
+}
+
+/**
+ * Call the GitLab REST API with a JSON request body piped via `--input -`.
+ *
+ * `glab api --raw-field`/`--field` serialize each key literally, so a nested
+ * key like `files[0][file_path]` becomes the JSON property name
+ * `"files[0][file_path]"` instead of a nested array — GitLab then reports the
+ * array as missing. Piping a real JSON body on stdin is the only way `glab
+ * api` can express nested objects or arrays.
+ */
+export async function glabApiJsonBody<T = unknown>(
+  path: string,
+  body: unknown,
+  opts: ApiBodyOptions = {},
+): Promise<T> {
+  const { ctx, method = "POST" } = opts;
+  const args = [
+    "api",
+    ctx ? path.replaceAll(":id", encodedProjectId(ctx)) : path,
+    "--method",
+    method,
+    "--input",
+    "-",
+  ];
+  const result = await runWithStdin(args, JSON.stringify(body), ctx);
+  throwOnFailure(result);
+  return parseJson<T>(result);
+}
+
 async function runApi(path: string, opts: ApiOptions): Promise<ExecResult> {
   const { ctx, method, fields } = opts;
   const args = [

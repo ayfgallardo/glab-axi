@@ -6,6 +6,7 @@ import {
   glabRaw,
   glabExecWithStdin,
   glabApiJson,
+  glabApiJsonBody,
   glabApiText,
 } from "../src/glab.js";
 import type { RepoContext } from "../src/context.js";
@@ -408,6 +409,89 @@ describe("glabApiJson", () => {
       expect.unreachable();
     } catch (e) {
       expect((e as AxiError).code).toBe("REPO_NOT_FOUND");
+    }
+  });
+});
+
+describe("glabApiJsonBody", () => {
+  beforeEach(() => {
+    mockedExecFile.mockReset();
+  });
+
+  it("pipes the JSON body via --input - instead of --raw-field/--field", async () => {
+    const stdinEnd = mockExecFileResultWithStdin(null, '{"id":1}', "");
+    const ctx: RepoContext = { fullPath: "group/project", source: "flag" };
+    const body = {
+      title: "notes",
+      visibility: "private",
+      files: [
+        { file_path: "a.py", content: "content a" },
+        { file_path: "b.py", content: "content b" },
+      ],
+    };
+
+    const result = await glabApiJsonBody("projects/:id/snippets", body, {
+      ctx,
+    });
+
+    expect(callArgs()).toEqual([
+      "api",
+      "projects/group%2Fproject/snippets",
+      "--method",
+      "POST",
+      "--input",
+      "-",
+    ]);
+    expect(stdinEnd).toHaveBeenCalledWith(JSON.stringify(body));
+    expect(result).toEqual({ id: 1 });
+  });
+
+  it("defaults to POST and never passes -R, which glab api rejects", async () => {
+    mockExecFileResultWithStdin(null, "{}", "");
+    await glabApiJsonBody("projects/:id/snippets", { title: "x" });
+    expect(callArgs()).not.toContain("-R");
+    expect(callArgs()).toContain("POST");
+  });
+
+  it("honors an explicit method", async () => {
+    mockExecFileResultWithStdin(null, "{}", "");
+    await glabApiJsonBody(
+      "projects/1/snippets/2",
+      { title: "x" },
+      { method: "PUT" },
+    );
+    expect(callArgs()).toEqual([
+      "api",
+      "projects/1/snippets/2",
+      "--method",
+      "PUT",
+      "--input",
+      "-",
+    ]);
+  });
+
+  it("never leaks the body into argv", async () => {
+    mockExecFileResultWithStdin(null, "{}", "");
+    await glabApiJsonBody("projects/:id/snippets", {
+      title: "x",
+      content: "super-secret-content",
+    });
+    expect(callArgs().join(" ")).not.toContain("super-secret-content");
+  });
+
+  it("maps glab api errors through mapGlabError", async () => {
+    const error = new Error("exit 1") as Error & { code: number };
+    error.code = 1;
+    mockExecFileResultWithStdin(
+      error,
+      "",
+      'glab: {"error":"files, content are missing, exactly one parameter must be provided"}glab: HTTP 400',
+    );
+    try {
+      await glabApiJsonBody("projects/:id/snippets", { title: "x" });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as AxiError).code).toBe("VALIDATION_ERROR");
     }
   });
 });
