@@ -139,6 +139,8 @@ Three gh-axi surfaces were dropped rather than ported, all genuinely GitHub-only
 
 `pin`/`unpin` were dropped too: GitLab issues have no pinning concept at all.
 
+`list --sort <created|updated>` maps onto `order_by=created_at|updated_at&sort=desc` (GitLab's `/projects/:id/issues` params), matching gh-axi's original always-descending order. `--sort comments` is rejected with a `VALIDATION_ERROR` explaining it has no GitLab equivalent, rather than silently dropped — GitLab issues carry no comment-count sort key.
+
 ## Merge requests (`src/commands/mr.ts`)
 
 Reads go through `glabApiJson` against the REST API and are shaped locally before TOON; mutations go through the `glab mr` subcommand that owns the flow (`create`, `close`, `reopen`, `merge`, `update`, `rebase`, `checkout`, `approve`, `revoke`). Two deliberate crossings of that line:

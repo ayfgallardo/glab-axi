@@ -148,6 +148,67 @@ describe("issueCommand", () => {
       expect(query.get("per_page")).toBe("100");
     });
 
+    it("maps --sort created onto order_by=created_at&sort=desc", async () => {
+      mockedApi.mockResolvedValue([]);
+
+      await issueCommand(["list", "--sort", "created"], ctx);
+
+      const query = new URLSearchParams(apiPathsOf()[0].split("?")[1]);
+      expect(query.get("order_by")).toBe("created_at");
+      expect(query.get("sort")).toBe("desc");
+    });
+
+    it("maps --sort updated onto order_by=updated_at&sort=desc", async () => {
+      mockedApi.mockResolvedValue([]);
+
+      await issueCommand(["list", "--sort", "updated"], ctx);
+
+      const query = new URLSearchParams(apiPathsOf()[0].split("?")[1]);
+      expect(query.get("order_by")).toBe("updated_at");
+      expect(query.get("sort")).toBe("desc");
+    });
+
+    it("rejects --sort comments with an explanation instead of silently dropping it", async () => {
+      await expect(
+        issueCommand(["list", "--sort", "comments"], ctx),
+      ).rejects.toThrow(/--sort comments has no GitLab equivalent/);
+      expect(mockedApi).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown --sort value", async () => {
+      await expect(
+        issueCommand(["list", "--sort", "bogus"], ctx),
+      ).rejects.toThrow(AxiError);
+      expect(mockedApi).not.toHaveBeenCalled();
+    });
+
+    it("omits order_by/sort when --sort is not passed", async () => {
+      mockedApi.mockResolvedValue([]);
+
+      await issueCommand(["list"], ctx);
+
+      const query = new URLSearchParams(apiPathsOf()[0].split("?")[1]);
+      expect(query.get("order_by")).toBeNull();
+      expect(query.get("sort")).toBeNull();
+    });
+
+    it("adds updatedAt and closedAt columns with --fields", async () => {
+      mockedApi.mockResolvedValue([
+        issuePayload({
+          updated_at: "2026-01-05T00:00:00Z",
+          closed_at: "2026-01-06T00:00:00Z",
+        }),
+      ]);
+
+      const result = await issueCommand(
+        ["list", "--fields", "updatedAt,closedAt"],
+        ctx,
+      );
+
+      expect(result).toContain("updatedAt");
+      expect(result).toContain("closedAt");
+    });
+
     it("suggests creating an issue when the list is empty", async () => {
       mockedApi.mockResolvedValue([]);
 

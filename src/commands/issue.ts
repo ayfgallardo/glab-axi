@@ -124,6 +124,14 @@ const ISSUE_LIST_EXTRA_FIELDS: Record<string, ExtraFieldSpec> = {
     def: pluck("milestone", "title", "milestone"),
   },
   url: { jsonKey: "web_url", def: field("web_url", "url") },
+  updatedAt: {
+    jsonKey: "updated_at",
+    def: relativeTime("updated_at", "updatedAt"),
+  },
+  closedAt: {
+    jsonKey: "closed_at",
+    def: relativeTime("closed_at", "closedAt"),
+  },
 };
 
 const viewSchema: FieldDef[] = [
@@ -179,6 +187,7 @@ const ISSUE_FLAGS: Record<string, readonly string[]> = {
     "--assignee",
     "--author",
     "--milestone",
+    "--sort",
     "--search",
     "--limit",
   ],
@@ -213,7 +222,7 @@ export const ISSUE_HELP = `usage: glab-axi issue <subcommand> [flags]
 subcommands[10]:
   list, view <iid>, create, edit <iid>, close <iid>, reopen <iid>, comment <iid>, delete <iid>, lock <iid>, unlock <iid>
 flags{list}:
-  --state <opened|closed>, --label (repeatable), --assignee, --author, --milestone, --search <text>, --limit <n> (default 30, max 100), --fields <a,b,c>
+  --state <opened|closed>, --label (repeatable), --assignee, --author, --milestone, --sort <created|updated> (comments has no GitLab equivalent), --search <text>, --limit <n> (default 30, max 100), --fields <a,b,c>
 flags{view}:
   --comments, --full (show the complete description and comment bodies without truncation)
 flags{create}:
@@ -234,6 +243,35 @@ examples:
 // Subcommands
 // ---------------------------------------------------------------------------
 
+const SORT_ORDER_BY: Record<string, string> = {
+  created: "created_at",
+  updated: "updated_at",
+};
+
+/**
+ * gh-axi's --sort accepted `comments` too (GitHub search order), which has no
+ * GitLab equivalent — GitLab issues carry no comment-count sort. Reject it
+ * explicitly instead of silently falling back to the default order.
+ */
+function applySort(query: URLSearchParams, sort: string | undefined): void {
+  if (sort === undefined) return;
+  if (sort === "comments") {
+    throw new AxiError(
+      "--sort comments has no GitLab equivalent — use created or updated",
+      "VALIDATION_ERROR",
+    );
+  }
+  const orderBy = SORT_ORDER_BY[sort];
+  if (!orderBy) {
+    throw new AxiError(
+      "--sort must be one of: created, updated",
+      "VALIDATION_ERROR",
+    );
+  }
+  query.set("order_by", orderBy);
+  query.set("sort", "desc");
+}
+
 async function issueList(args: string[], ctx?: RepoContext): Promise<string> {
   const fieldsArg = takeFlag(args, "--fields");
   const { extraDefs } = parseFields(fieldsArg, ISSUE_LIST_EXTRA_FIELDS);
@@ -242,6 +280,7 @@ async function issueList(args: string[], ctx?: RepoContext): Promise<string> {
   const assignee = takeFlag(args, "--assignee");
   const author = takeFlag(args, "--author");
   const milestone = takeFlag(args, "--milestone");
+  const sort = takeFlag(args, "--sort");
   const search = takeFlag(args, "--search");
   const limit = resolveLimit(args, 30);
 
@@ -251,6 +290,7 @@ async function issueList(args: string[], ctx?: RepoContext): Promise<string> {
   if (author) query.set("author_username", author);
   if (milestone) query.set("milestone", milestone);
   if (search) query.set("search", search);
+  applySort(query, sort);
 
   const items = await glabApiJson<IssueItem[]>(
     `projects/:id/issues?${query.toString()}`,
