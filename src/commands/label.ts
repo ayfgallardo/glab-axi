@@ -85,6 +85,25 @@ async function createLabel(args: string[], ctx?: RepoContext): Promise<string> {
   }
   const description = takeFlag(args, "--description");
 
+  const existing = await glabApiJson<GlabLabel[]>(
+    `projects/:id/labels?search=${encodeURIComponent(name)}`,
+    { ctx },
+  );
+  const found = existing.find(
+    (label) => label.name.toLowerCase() === name.toLowerCase(),
+  );
+  if (found) {
+    const suggestions = getSuggestions({
+      domain: "label",
+      action: "create",
+      repo: ctx,
+    });
+    return renderOutput([
+      encode({ created: "already_exists", label: found.name }),
+      renderHelp(suggestions),
+    ]);
+  }
+
   const glabArgs = ["label", "create", "--name", name, "--color", color];
   if (description) glabArgs.push("--description", description);
 

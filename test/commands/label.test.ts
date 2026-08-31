@@ -80,7 +80,8 @@ describe("labelCommand", () => {
       ).rejects.toThrow("--color is required");
     });
 
-    it("calls glab label create with the given flags", async () => {
+    it("calls glab label create with the given flags when the label does not exist yet", async () => {
+      mockedApi.mockResolvedValueOnce([]);
       mockedExec.mockResolvedValueOnce("");
 
       const result = await labelCommand(
@@ -88,6 +89,7 @@ describe("labelCommand", () => {
         ctx,
       );
 
+      expect(apiPathsOf()).toEqual(["projects/:id/labels?search=bug"]);
       expect(execArgsOf()).toEqual([
         "label",
         "create",
@@ -99,6 +101,21 @@ describe("labelCommand", () => {
         "d",
       ]);
       expect(result).toContain("created: ok");
+    });
+
+    it("is idempotent: short-circuits with already_exists instead of calling glab label create", async () => {
+      mockedApi.mockResolvedValueOnce([
+        { name: "Bug", color: "#d9534f", description: null },
+      ]);
+
+      const result = await labelCommand(
+        ["create", "--name", "bug", "--color", "#ff0000"],
+        ctx,
+      );
+
+      expect(result).toContain("already_exists");
+      expect(result).toContain("Bug");
+      expect(mockedExec).not.toHaveBeenCalled();
     });
   });
 
