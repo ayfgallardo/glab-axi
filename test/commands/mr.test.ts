@@ -146,6 +146,22 @@ describe("mrCommand", () => {
       expect(query.get("per_page")).toBe("5");
     });
 
+    it("clamps --limit to GitLab's 100-per-page cap", async () => {
+      mockedApi.mockResolvedValue([]);
+
+      await mrCommand(["list", "--limit", "500"], ctx);
+
+      const query = new URLSearchParams(apiPathsOf()[0].split("?")[1]);
+      expect(query.get("per_page")).toBe("100");
+    });
+
+    it("rejects a non-numeric --limit", async () => {
+      await expect(mrCommand(["list", "--limit", "abc"], ctx)).rejects.toThrow(
+        /--limit must be a positive integer/,
+      );
+      expect(mockedApi).not.toHaveBeenCalled();
+    });
+
     it("suggests creating a merge request when the list is empty", async () => {
       mockedApi.mockResolvedValue([]);
 
@@ -378,6 +394,18 @@ describe("mrCommand", () => {
         "",
         "--yes",
       ]);
+    });
+
+    it("reports iid: null and drops id-dependent suggestions when the URL regex misses", async () => {
+      mockedExec.mockResolvedValue("not a url\n");
+
+      const result = await mrCommand(["create", "--title", "T"], ctx);
+
+      expect(result).toContain("iid: null");
+      expect(result).toContain("not a url");
+      expect(result).not.toContain("undefined");
+      expect(result).not.toContain("mr view");
+      expect(result).toContain("ci status");
     });
   });
 

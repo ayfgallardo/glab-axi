@@ -97,7 +97,6 @@ const table: SuggestionEntry[] = [
       `Run \`glab-axi${repoFlag(c)} issue comment ${c.id} --body-file <path>\` to comment`,
       `Run \`glab-axi${repoFlag(c)} issue close ${c.id}\` to close`,
       `Run \`glab-axi${repoFlag(c)} issue edit ${c.id} --add-assignee <user>\` to assign`,
-      `Run \`glab-axi search prs "${c.id}"${c.repo ? ` --repo ${c.repo.fullPath}` : ""}\` to find PRs referencing this issue`,
     ],
   },
   {
@@ -106,13 +105,12 @@ const table: SuggestionEntry[] = [
     lines: (c) => [
       `Run \`glab-axi${repoFlag(c)} issue reopen ${c.id}\` to reopen`,
       `Run \`glab-axi${repoFlag(c)} issue comment ${c.id} --body-file <path>\` to comment`,
-      `Run \`glab-axi search prs "${c.id}"${c.repo ? ` --repo ${c.repo.fullPath}` : ""}\` to find PRs referencing this issue`,
     ],
   },
 
   // Issue create
   {
-    match: (c) => c.domain === "issue" && c.action === "create",
+    match: (c) => c.domain === "issue" && c.action === "create" && !!c.id,
     lines: (c) => [
       `Run \`glab-axi${repoFlag(c)} issue view ${c.id}\` to see the full issue`,
       `Run \`glab-axi${repoFlag(c)} issue edit ${c.id} --add-label <label>\` to label`,
@@ -187,9 +185,15 @@ const table: SuggestionEntry[] = [
 
   // MR create
   {
-    match: (c) => c.domain === "mr" && c.action === "create",
+    match: (c) => c.domain === "mr" && c.action === "create" && !!c.id,
     lines: (c) => [
       `Run \`glab-axi${repoFlag(c)} mr view ${c.id}\` to see the full merge request`,
+      `Run \`glab-axi${repoFlag(c)} ci status\` to monitor the pipeline`,
+    ],
+  },
+  {
+    match: (c) => c.domain === "mr" && c.action === "create",
+    lines: (c) => [
       `Run \`glab-axi${repoFlag(c)} ci status\` to monitor the pipeline`,
     ],
   },

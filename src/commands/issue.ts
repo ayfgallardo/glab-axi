@@ -222,7 +222,7 @@ export const ISSUE_HELP = `usage: glab-axi issue <subcommand> [flags]
 subcommands[10]:
   list, view <iid>, create, edit <iid>, close <iid>, reopen <iid>, comment <iid>, delete <iid>, lock <iid>, unlock <iid>
 flags{list}:
-  --state <opened|closed>, --label (repeatable), --assignee, --author, --milestone, --sort <created|updated> (comments has no GitLab equivalent), --search <text>, --limit <n> (default 30, max 100), --fields <a,b,c>
+  --state <opened|closed|all>, --label (repeatable), --assignee, --author, --milestone, --sort <created|updated> (comments has no GitLab equivalent), --search <text>, --limit <n> (default 30, max 100), --fields <a,b,c>
 flags{view}:
   --comments, --full (show the complete description and comment bodies without truncation)
 flags{create}:
@@ -381,7 +381,7 @@ async function issueCreate(args: string[], ctx?: RepoContext): Promise<string> {
   const url = stdout.trim().split("\n").pop()?.trim() ?? "";
 
   return renderOutput([
-    renderDetail("created", { iid: iid ?? url, url }, [
+    renderDetail("created", { iid: iid ?? null, url }, [
       field("iid"),
       field("url"),
     ]),

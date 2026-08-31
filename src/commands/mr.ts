@@ -12,6 +12,8 @@ import {
   takeAllFlags,
   pushRepeated,
   rejectUnknownFlags,
+  resolveLimit,
+  PER_PAGE_MAX,
 } from "../args.js";
 import { parseFields, type ExtraFieldSpec } from "../fields.js";
 import {
@@ -127,8 +129,6 @@ function mrPath(iid: number, suffix = ""): string {
 function repoArg(ctx?: RepoContext): string {
   return ctx && ctx.source !== "git" ? ` -R ${ctx.fullPath}` : "";
 }
-
-const PER_PAGE_MAX = "100";
 
 async function fetchMr(iid: number, ctx?: RepoContext): Promise<MrItem> {
   return glabApiJson<MrItem>(mrPath(iid), { ctx });
@@ -305,7 +305,7 @@ export const MR_HELP = `usage: glab-axi mr <subcommand> [flags]
 subcommands[14]:
   list, view <iid>, create, edit <iid>, close <iid>, merge <iid>, review <iid>, checks <iid>, diff <iid>, checkout <iid>, ready <iid>, reopen <iid>, comment <iid>, rebase <iid>
 flags{list}:
-  --state <opened|closed|merged|locked|all>, --label (repeatable), --assignee, --author, --target-branch, --source-branch, --draft, --search <text>, --limit <n> (default 30), --fields <a,b,c>
+  --state <opened|closed|merged|locked|all>, --label (repeatable), --assignee, --author, --target-branch, --source-branch, --draft, --search <text>, --limit <n> (default 30, max 100), --fields <a,b,c>
 flags{view}:
   --comments, --reviews (show approvals and diff review threads), --full (show complete description without truncation)
 flags{create}:
@@ -346,9 +346,9 @@ async function mrList(args: string[], ctx?: RepoContext): Promise<string> {
   const sourceBranch = takeFlag(args, "--source-branch");
   const draft = takeBoolFlag(args, "--draft");
   const search = takeFlag(args, "--search");
-  const limit = takeFlag(args, "--limit") ?? "30";
+  const limit = resolveLimit(args, 30);
 
-  const query = new URLSearchParams({ state, per_page: limit });
+  const query = new URLSearchParams({ state, per_page: String(limit) });
   if (labels.length > 0) query.set("labels", labels.join(","));
   if (assignee) query.set("assignee_username", assignee);
   if (author) query.set("author_username", author);
@@ -362,10 +362,7 @@ async function mrList(args: string[], ctx?: RepoContext): Promise<string> {
     { ctx },
   );
 
-  const countLine = formatCountLine({
-    count: items.length,
-    limit: Number(limit),
-  });
+  const countLine = formatCountLine({ count: items.length, limit });
   const extendedSchema =
     extraDefs.length > 0 ? [...listSchema, ...extraDefs] : listSchema;
 
@@ -501,7 +498,7 @@ async function mrCreate(args: string[], ctx?: RepoContext): Promise<string> {
   const url = stdout.trim().split("\n").pop()?.trim() ?? "";
 
   return renderOutput([
-    renderDetail("created", { iid: iid ?? url, url }, [
+    renderDetail("created", { iid: iid ?? null, url }, [
       field("iid"),
       field("url"),
     ]),

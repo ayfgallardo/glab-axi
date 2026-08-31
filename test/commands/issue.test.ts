@@ -387,6 +387,17 @@ describe("issueCommand", () => {
         "--yes",
       ]);
     });
+
+    it("reports iid: null and drops id-dependent suggestions when the URL regex misses", async () => {
+      mockedExec.mockResolvedValue("not a url\n");
+
+      const result = await issueCommand(["create", "--title", "T"], ctx);
+
+      expect(result).toContain("iid: null");
+      expect(result).toContain("not a url");
+      expect(result).not.toContain("undefined");
+      expect(result).not.toContain("issue view");
+    });
   });
 
   describe("edit", () => {

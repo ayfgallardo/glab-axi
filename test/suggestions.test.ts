@@ -50,6 +50,46 @@ describe("getSuggestions", () => {
     expect(lines.some((l) => l.includes("reopen 42"))).toBe(true);
   });
 
+  it("never suggests the unported search command family", () => {
+    const open = getSuggestions({
+      domain: "issue",
+      action: "view",
+      state: "open",
+      id: 42,
+    });
+    const closed = getSuggestions({
+      domain: "issue",
+      action: "view",
+      state: "closed",
+      id: 42,
+    });
+    expect(open.some((l) => l.includes("search prs"))).toBe(false);
+    expect(closed.some((l) => l.includes("search prs"))).toBe(false);
+  });
+
+  it("gates id-dependent issue create suggestions on a present id", () => {
+    expect(
+      getSuggestions({ domain: "issue", action: "create", id: 42 }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      getSuggestions({ domain: "issue", action: "create", id: undefined }),
+    ).toEqual([]);
+  });
+
+  it("gates id-dependent mr create suggestions on a present id, keeping the generic one", () => {
+    const withId = getSuggestions({ domain: "mr", action: "create", id: 42 });
+    expect(withId.some((l) => l.includes("mr view 42"))).toBe(true);
+    expect(withId.some((l) => l.includes("ci status"))).toBe(true);
+
+    const withoutId = getSuggestions({
+      domain: "mr",
+      action: "create",
+      id: undefined,
+    });
+    expect(withoutId.some((l) => l.includes("mr view"))).toBe(false);
+    expect(withoutId.some((l) => l.includes("ci status"))).toBe(true);
+  });
+
   it("carries -R flag when repo source is not git", () => {
     const lines = getSuggestions({
       domain: "issue",

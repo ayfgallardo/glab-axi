@@ -382,6 +382,13 @@ describe("snippetCommand", () => {
         method: "DELETE",
       });
     });
+
+    it("rejects an unknown flag before calling glab", async () => {
+      await expect(
+        snippetCommand(["delete", "42", "--presonal"], ctx),
+      ).rejects.toThrow(/unknown flag for glab-axi snippet delete: --presonal/);
+      expect(mockedApiText).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects an unknown subcommand", async () => {

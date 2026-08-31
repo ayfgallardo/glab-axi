@@ -59,6 +59,22 @@ examples:
 /** GitLab caps a page at 100 items; also this endpoint's per_page ceiling. */
 const PAGE_SIZE = 100;
 
+const SNIPPET_FLAGS: Record<string, readonly string[]> = {
+  list: ["--personal", "--limit"],
+  view: ["--personal", "--files", "--full"],
+  create: [
+    "--personal",
+    "-t",
+    "--title",
+    "--file",
+    "--filename",
+    "-d",
+    "--desc",
+    "--visibility",
+  ],
+  delete: ["--personal"],
+};
+
 interface SnippetFile {
   path: string;
   raw_url: string;
@@ -249,8 +265,7 @@ async function createSnippet(
     }
   }
 
-  const remaining = args.filter((a) => a !== "create");
-  const positionals = remaining.filter((a) => !a.startsWith("-"));
+  const positionals = args.filter((a) => !a.startsWith("-"));
 
   if (positionals.length > 0 && fileFlags.length > 0) {
     throw new AxiError(
@@ -515,14 +530,23 @@ export async function snippetCommand(
 
   switch (sub) {
     case "list":
+      rejectUnknownFlags(args.slice(1), SNIPPET_FLAGS.list, "snippet", "list");
       return listSnippets(args.slice(1), ctx);
     case "view":
+      rejectUnknownFlags(args, SNIPPET_FLAGS.view, "snippet", "view");
       return viewSnippet(args, ctx);
     case "create":
+      rejectUnknownFlags(
+        args.slice(1),
+        SNIPPET_FLAGS.create,
+        "snippet",
+        "create",
+      );
       return createSnippet(args.slice(1), ctx);
     case "edit":
       return editSnippet(args, ctx);
     case "delete":
+      rejectUnknownFlags(args, SNIPPET_FLAGS.delete, "snippet", "delete");
       return deleteSnippet(args, ctx);
     default:
       return renderError(`Unknown subcommand: ${sub}`, "VALIDATION_ERROR", [
