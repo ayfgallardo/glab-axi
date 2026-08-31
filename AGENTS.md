@@ -150,13 +150,15 @@ Deliberate divergences from gh-axi's `pr`, all GitLab vocabulary rather than Git
 
 Mapping, all verified against the REST docs and a live instance:
 
-- `list` -> `GET /projects/:id/pipelines`, `status` -> `GET /projects/:id/pipelines/latest` (`?ref=`), `view` -> the pipeline plus `GET /projects/:id/pipelines/:pipeline_id/jobs`.
+- `list` and `status` both read `GET /projects/:id/pipelines` (`status` as `?ref=<branch>&per_page=1`). **Do not switch `status` to `pipelines/latest`**: that endpoint answers **403** when the ref has no pipeline, which would report the most common benign state of the module's most used command as FORBIDDEN. The list endpoint answers `200 []`, rendered as an explicit `no pipeline for <ref>`. `status` defaults its ref to the checked-out branch (`resolveCurrentBranch` in `context.ts`), even under `-R`.
+- `view` -> the pipeline plus `GET /projects/:id/pipelines/:pipeline_id/jobs`, but `view --job` reads `GET /projects/:id/jobs/:job_id` and checks the job's own `pipeline.id`. Filtering the job list would call a job past the 100th missing from a pipeline that does contain it.
 - `retry` and `cancel` are **mutations done through the API** (`POST …/pipelines/:id/retry|cancel`, `POST …/jobs/:id/retry`), unlike the `mr` rule of preferring the subcommand: `glab ci retry` only ever retries a *job* and prompts interactively without one, and `glab ci cancel pipeline` would then be the odd one out.
 - `run` does go through `glab ci run` (`--branch`, repeatable `--variables k:v`); the new pipeline id is parsed out of the emitted URL, as in `mr create`.
 - `log <job-id>` -> `GET /projects/:id/jobs/:job_id/trace`, which returns **plain text** — hence `glabApiText`. The trace is the runner's raw terminal output, so the ANSI escapes are stripped (gh already hands back a clean log) before the tail-first truncation at 20 000 chars and the best-effort full-log tempfile.
 - `watch` polls the pipeline itself (`--interval`, `--timeout`, both bounded): `glab ci status --live` and `glab ci view` are TUIs, and AXI commands must never go interactive. A timeout returns `timed_out: true` rather than an error.
+- `src/pipelineStatus.ts` holds the two status sets these commands need, and they are **not** the same: a pipeline on a `manual` gate never advances on its own (`isWatchTerminal`, so `watch` stops) yet is still perfectly cancellable (`isCancelNoop` excludes it). `src/suggestions.ts` reads the same predicates rather than re-listing the literals.
 
-Two GitLab traps: `pipelines/latest` answers **403** when the ref has no pipeline at all, so a missing pipeline surfaces as FORBIDDEN; and `per_page` is capped at 100, so `--limit` is clamped rather than promising more than one page returns.
+`per_page` is capped at 100 GitLab-side, so `--limit` is clamped rather than promising more than one page returns, and a full page of jobs is reported as truncated instead of reading as the whole pipeline.
 
 ## Pipeline schedules (`src/commands/schedule.ts`)
 
