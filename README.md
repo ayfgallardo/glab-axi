@@ -56,4 +56,26 @@ An explicit `--hostname` always wins over `GITLAB_HOST`.
 
 ## Benchmark
 
-_Pending — token comparison of raw `glab` vs `glab-axi` output on the ported read commands._
+Tokens (`o200k_base`) of raw `glab` output vs `glab-axi` output, on the ported read commands, measured 2026-08-31 against `geofoncier/geofoncier-back` on `git.geofoncier.fr` — methodology, chosen glab sequences, and known anomalies in `bench/README.md`; rerun with `pnpm exec tsx bench/run.ts`.
+
+| Commande      | Tokens glab | Tokens glab-axi | Delta %  | Note                                                              |
+| ------------- | ----------- | --------------- | -------- | ----------------------------------------------------------------- |
+| mr list       | 273         | 268             | -1.8%    |                                                                   |
+| mr view       | 369         | 269             | -27.1%   |                                                                   |
+| ci status     | 119         | 211             | +77.3%   |                                                                   |
+| ci view       | 19192       | 708             | -96.3%   |                                                                   |
+| issue list    | 47          | 101             | +114.9%  |                                                                   |
+| issue view    | 6869        | 202             | -97.1%   |                                                                   |
+| release list  | 1062        | 1911            | +79.9%   |                                                                   |
+| repo view     | 1677        | 90              | -94.6%   |                                                                   |
+| variable list | 139         | 660             | +374.8%  | asymétrie volontaire — `glab-axi` affiche les valeurs, `glab` non |
+| label list    | 44          | 71              | +61.4%   |                                                                   |
+| snippet list  | 1           | 47              | +4600.0% | paire vide (projet sans snippet)                                  |
+| schedule list | 60          | 132             | +120.0%  |                                                                   |
+| home          | 5104        | 162             | -96.8%   |                                                                   |
+
+Delta médian : +61.4 %. Les commandes qui remplacent une sortie API brute très verbeuse par un
+résumé structuré (`ci view`, `issue view`, `repo view`, `home`) économisent le plus ; les petites
+listes courtes chez `glab` (`issue list`, `variable list`, `snippet list`, `schedule list`) coûtent
+plus cher chez `glab-axi`, dont l'enveloppe TOON et les suggestions ont un coût fixe qui domine
+sur de très petites sorties.
