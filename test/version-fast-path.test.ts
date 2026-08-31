@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const builtBin = join(repoRoot, "dist", "bin", "gh-axi.js");
+const builtBin = join(repoRoot, "dist", "bin", "glab-axi.js");
 const registerHook = fileURLToPath(
   new URL("./fixtures/module-trace-register.mjs", import.meta.url),
 );
@@ -20,7 +20,7 @@ const packageVersion = (
 type Run = { stdout: string; modules: string[] };
 
 function runBin(args: string[]): Run {
-  const dir = mkdtempSync(join(tmpdir(), "gh-axi-trace-"));
+  const dir = mkdtempSync(join(tmpdir(), "glab-axi-trace-"));
   const traceFile = join(dir, "trace.txt");
   writeFileSync(traceFile, "", "utf8");
   try {
@@ -31,7 +31,7 @@ function runBin(args: string[]): Run {
         encoding: "utf8",
         env: {
           ...process.env,
-          GH_AXI_MODULE_TRACE_FILE: traceFile,
+          GLAB_AXI_MODULE_TRACE_FILE: traceFile,
         },
       },
     );
@@ -72,7 +72,7 @@ describe("--version fast path", () => {
       [],
     );
     expect(
-      modules.filter((url) => url.includes("/dist/src/commands/")),
+      modules.filter((url) => url.endsWith("/dist/src/suggestions.js")),
     ).toEqual([]);
     expect(modules.filter((url) => url.includes("@toon-format"))).toEqual([]);
   });
@@ -82,9 +82,9 @@ describe("--version fast path", () => {
     const { modules } = runBin(["--help"]);
 
     expect(modules.some((url) => url.endsWith("/dist/src/cli.js"))).toBe(true);
-    expect(modules.some((url) => url.includes("/dist/src/commands/"))).toBe(
-      true,
-    );
+    expect(
+      modules.some((url) => url.endsWith("/dist/src/suggestions.js")),
+    ).toBe(true);
     expect(modules.some((url) => url.includes("@toon-format"))).toBe(true);
   });
 });

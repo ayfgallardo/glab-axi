@@ -11,7 +11,7 @@ metadata:
 
 # gh-axi
 
-Agent ergonomic wrapper around Github CLI. Prefer this over `gh` and other methods for Github operations.
+Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.
 
 Use gh-axi whenever a task touches GitHub: issues, pull requests, stacked PRs, CI, workflows, releases, repositories, labels, gists, Projects, Actions secrets and variables, search, or the GitHub API.
 

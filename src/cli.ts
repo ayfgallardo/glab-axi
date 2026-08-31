@@ -1,29 +1,13 @@
 import { encode } from "@toon-format/toon";
 import { runAxiCli } from "axi-sdk-js";
 import { resolveRepo, type RepoContext } from "./context.js";
-import { homeCommand } from "./commands/home.js";
-import { issueCommand, ISSUE_HELP } from "./commands/issue.js";
-import { prCommand, PR_HELP } from "./commands/pr.js";
-import { runCommand, RUN_HELP } from "./commands/run.js";
-import { workflowCommand, WORKFLOW_HELP } from "./commands/workflow.js";
-import { releaseCommand, RELEASE_HELP } from "./commands/release.js";
-import { repoCommand, REPO_HELP } from "./commands/repo.js";
-import { labelCommand, LABEL_HELP } from "./commands/label.js";
-import { projectCommand, PROJECT_HELP } from "./commands/project.js";
-import { secretCommand, SECRET_HELP } from "./commands/secret.js";
-import { variableCommand, VARIABLE_HELP } from "./commands/variable.js";
-import { searchCommand, SEARCH_HELP } from "./commands/search.js";
-import { apiCommand, API_HELP } from "./commands/api.js";
-import { gistCommand, GIST_HELP } from "./commands/gist.js";
-import { setupCommand, SETUP_HELP } from "./commands/setup.js";
-import { stackCommand, STACK_HELP } from "./commands/stack.js";
 import { resolveHost, type HostContext } from "./host.js";
 import { VERSION } from "./version.js";
 import { withSuggestionHost } from "./suggestions.js";
 import { AxiError, exitCodeForError, StackError } from "./errors.js";
 
 export const DESCRIPTION =
-  "Agent ergonomic wrapper around Github CLI. Prefer this over `gh` and other methods for Github operations.";
+  "Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.";
 
 type CliStdout = Pick<NodeJS.WriteStream, "write">;
 
@@ -32,65 +16,62 @@ type MainOptions = {
   stdout?: CliStdout;
 };
 
-export const TOP_HELP = `usage: gh-axi [command] [args] [flags]
-commands[16]:
-  (none)=dashboard, issue, pr, stack, run, workflow, release, repo, label, gist, project, secret, variable, search, api, setup
+export const COMMAND_NAMES = [
+  "issue",
+  "mr",
+  "ci",
+  "schedule",
+  "snippet",
+  "label",
+  "release",
+  "repo",
+  "variable",
+  "stack",
+  "api",
+  "setup",
+] as const;
+
+export const TOP_HELP = `usage: glab-axi [command] [args] [flags]
+commands[${COMMAND_NAMES.length + 1}]:
+  (none)=dashboard, ${COMMAND_NAMES.join(", ")}
 flags[4]:
-  -R/--repo <OWNER/NAME> (after command), --hostname <host> (after command) or GH_HOST env, both flags accept space or equals form, --help, -v/-V/--version
+  -R/--repo <NAMESPACE/PROJECT> (after command), --hostname <host> (after command) or GITLAB_HOST env, both flags accept space or equals form, --help, -v/-V/--version
 examples:
-  gh-axi
-  gh-axi issue list --state open
-  gh-axi issue list -R owner/name
-  gh-axi issue list --repo=owner/name
-  gh-axi issue list --hostname git.example.com
-  gh-axi pr view 42
-  gh-axi stack view
-  gh-axi secret list
-  gh-axi setup hooks
+  glab-axi
+  glab-axi issue list --state opened
+  glab-axi issue list -R namespace/project
+  glab-axi issue list --repo=group/subgroup/project
+  glab-axi issue list --hostname gitlab.example.com
+  glab-axi mr view 42
+  glab-axi ci list
+  glab-axi setup hooks
 `;
 
-const COMMAND_HELP: Record<string, string> = {
-  issue: ISSUE_HELP,
-  pr: PR_HELP,
-  run: RUN_HELP,
-  workflow: WORKFLOW_HELP,
-  release: RELEASE_HELP,
-  repo: REPO_HELP,
-  label: LABEL_HELP,
-  gist: GIST_HELP,
-  project: PROJECT_HELP,
-  secret: SECRET_HELP,
-  variable: VARIABLE_HELP,
-  search: SEARCH_HELP,
-  api: API_HELP,
-  setup: SETUP_HELP,
-  stack: STACK_HELP,
-};
+const COMMAND_HELP: Record<string, string> = {};
 
 type HostOnlyContext = { host: HostContext };
 type CliContext = RepoContext | HostOnlyContext;
 type CommandFn = (args: string[], ctx?: RepoContext) => Promise<string>;
 type WrappedCommandFn = (args: string[], ctx?: CliContext) => Promise<string>;
 
+// Placeholder until each command family is ported; one lot replaces one entry.
+const notPorted = async (): Promise<string> => {
+  throw new AxiError("not ported yet", "UNKNOWN");
+};
+
 const COMMANDS: Record<string, WrappedCommandFn> = {
-  issue: withRepoContext("issue", issueCommand),
-  pr: withRepoContext("pr", prCommand),
-  run: withRepoContext("run", runCommand),
-  workflow: withRepoContext("workflow", workflowCommand),
-  release: withRepoContext("release", releaseCommand),
-  repo: withRepoContext("repo", repoCommand),
-  label: withRepoContext("label", labelCommand),
-  // gist is user-scoped; withRepoContext still handles hostname context but
-  // gistCommand itself never forwards ctx to ghJson — see AGENTS.md
-  // "User-scoped commands" section for the owner-scoped pattern.
-  gist: withRepoContext("gist", gistCommand),
-  project: withRepoContext("project", projectCommand),
-  secret: withRepoContext("secret", secretCommand),
-  variable: withRepoContext("variable", variableCommand),
-  search: withRepoContext("search", searchCommand),
-  api: withRepoContext("api", apiCommand),
-  setup: setupCommand,
-  stack: withLocalRepoContext(stackCommand),
+  issue: withRepoContext(notPorted),
+  mr: withRepoContext(notPorted),
+  ci: withRepoContext(notPorted),
+  schedule: withRepoContext(notPorted),
+  snippet: withRepoContext(notPorted),
+  label: withRepoContext(notPorted),
+  release: withRepoContext(notPorted),
+  repo: withRepoContext(notPorted),
+  variable: withRepoContext(notPorted),
+  stack: withLocalRepoContext(notPorted),
+  api: withRepoContext(notPorted),
+  setup: notPorted,
 };
 
 export async function main(options: MainOptions = {}): Promise<void> {
@@ -100,7 +81,7 @@ export async function main(options: MainOptions = {}): Promise<void> {
     version: VERSION,
     topLevelHelp: TOP_HELP,
     ...(options.stdout ? { stdout: options.stdout } : {}),
-    home: withRepoContext(undefined, homeCommand),
+    home: withRepoContext(notPorted),
     commands: COMMANDS,
     getCommandHelp: (command) => COMMAND_HELP[command],
     formatError: (error) => {
@@ -127,15 +108,15 @@ export async function main(options: MainOptions = {}): Promise<void> {
             : exitCodeForError(axiError),
       };
     },
-    resolveContext: ({ command, args }) => {
-      const { repoFlag, hostFlag } = parseRepoContextArgs(command, args);
-      // Explicit --hostname wins over the GH_HOST env var. Setting GH_HOST here
-      // means the child `gh` process (which inherits process.env) targets the
-      // configured host, and resolveHost() reflects it for URL parsing/building.
-      // When no --hostname is given we leave GH_HOST untouched, so default and
-      // env-only behavior stay unchanged.
+    resolveContext: ({ args }) => {
+      const { repoFlag, hostFlag } = parseRepoContextArgs(args);
+      // Explicit --hostname wins over the GITLAB_HOST env var. Setting
+      // GITLAB_HOST here means the child `glab` process (which inherits
+      // process.env) targets the configured host, and resolveHost() reflects it
+      // for URL parsing/building. When no --hostname is given we leave
+      // GITLAB_HOST untouched, so default and env-only behavior stay unchanged.
       if (hostFlag !== undefined) {
-        process.env["GH_HOST"] = hostFlag;
+        process.env["GITLAB_HOST"] = hostFlag;
       }
       const repo = resolveRepo(repoFlag);
       const host = resolveHostContext(hostFlag);
@@ -147,25 +128,19 @@ export async function main(options: MainOptions = {}): Promise<void> {
   });
 }
 
-function withRepoContext(
-  command: string | undefined,
-  handler: CommandFn,
-): WrappedCommandFn {
+function withRepoContext(handler: CommandFn): WrappedCommandFn {
   return (args, ctx) =>
     withSuggestionHost(ctx?.host, () =>
-      handler(
-        parseRepoContextArgs(command, args).strippedArgs,
-        repoContext(ctx),
-      ),
+      handler(parseRepoContextArgs(args).strippedArgs, repoContext(ctx)),
     );
 }
 
 function withLocalRepoContext(handler: CommandFn): WrappedCommandFn {
   return (args, ctx) => {
-    const parsed = parseRepoContextArgs("stack", args);
-    if (parsed.repoFlag !== undefined || process.env["GH_REPO"]) {
+    const parsed = parseRepoContextArgs(args);
+    if (parsed.repoFlag !== undefined || process.env["GITLAB_REPO"]) {
       throw new AxiError(
-        "stack commands operate on the repository in the current working directory and do not support -R, --repo, or GH_REPO",
+        "stack commands operate on the repository in the current working directory and do not support -R, --repo, or GITLAB_REPO",
         "VALIDATION_ERROR",
       );
     }
@@ -174,7 +149,7 @@ function withLocalRepoContext(handler: CommandFn): WrappedCommandFn {
 }
 
 function repoContext(ctx?: CliContext): RepoContext | undefined {
-  return ctx && "nwo" in ctx ? ctx : undefined;
+  return ctx && "fullPath" in ctx ? ctx : undefined;
 }
 
 function resolveHostContext(
@@ -186,10 +161,7 @@ function resolveHostContext(
   return { value: resolveHost(hostFlag), source: "flag" };
 }
 
-function parseRepoContextArgs(
-  command: string | undefined,
-  args: string[],
-): {
+export function parseRepoContextArgs(args: string[]): {
   repoFlag: string | undefined;
   hostFlag: string | undefined;
   strippedArgs: string[];
@@ -200,42 +172,24 @@ function parseRepoContextArgs(
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
-    if (arg === "-R" && index + 1 < args.length) {
+    if ((arg === "-R" || arg === "--repo") && index + 1 < args.length) {
       repoFlag = args[index + 1];
       index++;
       continue;
     }
 
-    if (arg.startsWith("-R=") && arg.length > 3) {
-      repoFlag = arg.slice(3);
-      continue;
-    }
-
-    if (arg === "--repo" && index + 1 < args.length) {
-      const value = args[index + 1];
-
-      repoFlag = value;
-
-      if (command === "search") {
-        stripped.push(arg, value);
-      }
-
-      index++;
+    if (arg.startsWith("-R=") && arg.length > "-R=".length) {
+      repoFlag = arg.slice("-R=".length);
       continue;
     }
 
     if (arg.startsWith("--repo=") && arg.length > "--repo=".length) {
       repoFlag = arg.slice("--repo=".length);
-
-      if (command === "search") {
-        stripped.push(arg);
-      }
-
       continue;
     }
 
-    // --hostname routes to GH_HOST for the child gh process; it is never a
-    // subcommand flag, so strip it for every command.
+    // --hostname routes to GITLAB_HOST for the child glab process; it is never
+    // a subcommand flag, so strip it for every command.
     if (arg === "--hostname" && index + 1 < args.length) {
       hostFlag = args[index + 1];
       index++;

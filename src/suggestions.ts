@@ -21,7 +21,7 @@ type SuggestionEntry = {
 
 function repoFlag(ctx: SuggestionContext): string {
   if (ctx.repo && ctx.repo.source !== "git") {
-    return ` -R ${ctx.repo.nwo}`;
+    return ` -R ${ctx.repo.fullPath}`;
   }
   return "";
 }
@@ -99,7 +99,7 @@ const table: SuggestionEntry[] = [
       `Run \`gh-axi${repoFlag(c)} issue comment ${c.id} --body-file <path>\` to comment`,
       `Run \`gh-axi${repoFlag(c)} issue close ${c.id}\` to close`,
       `Run \`gh-axi${repoFlag(c)} issue edit ${c.id} --add-assignee <user>\` to assign`,
-      `Run \`gh-axi search prs "${c.id}"${c.repo ? ` --repo ${c.repo.nwo}` : ""}\` to find PRs referencing this issue`,
+      `Run \`gh-axi search prs "${c.id}"${c.repo ? ` --repo ${c.repo.fullPath}` : ""}\` to find PRs referencing this issue`,
     ],
   },
   {
@@ -108,7 +108,7 @@ const table: SuggestionEntry[] = [
     lines: (c) => [
       `Run \`gh-axi${repoFlag(c)} issue reopen ${c.id}\` to reopen`,
       `Run \`gh-axi${repoFlag(c)} issue comment ${c.id} --body-file <path>\` to comment`,
-      `Run \`gh-axi search prs "${c.id}"${c.repo ? ` --repo ${c.repo.nwo}` : ""}\` to find PRs referencing this issue`,
+      `Run \`gh-axi search prs "${c.id}"${c.repo ? ` --repo ${c.repo.fullPath}` : ""}\` to find PRs referencing this issue`,
     ],
   },
 

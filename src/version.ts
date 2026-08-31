@@ -1,5 +1,5 @@
 // Leaf module: imports node builtins only, never the command graph.
-// `bin/gh-axi.ts` imports this on the `--version` fast path, so any new import
+// `bin/glab-axi.ts` imports this on the `--version` fast path, so any new import
 // here would be paid on every invocation of that path.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -24,7 +24,7 @@ function readPackageVersion(): string {
     }
   }
 
-  throw new Error("Could not determine gh-axi package version");
+  throw new Error("Could not determine glab-axi package version");
 }
 
 export const VERSION = readPackageVersion();
