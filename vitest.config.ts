@@ -2,7 +2,7 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 // Suites still written against the unported gh-axi modules. Each port lot drops
 // its own entry here and from tsconfig's `src/commands` exclusions:
-// mr (Task 2), issue (Task 3), ci/schedule (Task 4), snippet/label/release/repo
+// mr (Task 2), ci/schedule (Task 3), issue (Task 4), snippet/label/release/repo
 // (Task 5), variable/stack (Task 6), api/home/setup and help-examples (Task 7).
 const NOT_PORTED_YET = [
   "test/commands/api.test.ts",
@@ -13,13 +13,11 @@ const NOT_PORTED_YET = [
   "test/commands/project.test.ts",
   "test/commands/release.test.ts",
   "test/commands/repo.test.ts",
-  "test/commands/run.test.ts",
   "test/commands/search.test.ts",
   "test/commands/secret.test.ts",
   "test/commands/stack.test.ts",
   "test/commands/variable.test.ts",
   "test/commands/workflow.test.ts",
-  "test/commands/workflow-run-dispatch.test.ts",
   "test/integration/**",
   "test/help-examples.test.ts",
   "test/totals.test.ts",

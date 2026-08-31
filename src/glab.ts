@@ -147,6 +147,23 @@ export async function glabApiJson<T = unknown>(
   path: string,
   opts: ApiOptions = {},
 ): Promise<T> {
+  const result = await runApi(path, opts);
+  return parseJson<T>(result);
+}
+
+/**
+ * Call a GitLab REST endpoint that answers with plain text rather than JSON,
+ * such as a job log (`/jobs/:job_id/trace`).
+ */
+export async function glabApiText(
+  path: string,
+  opts: ApiOptions = {},
+): Promise<string> {
+  const result = await runApi(path, opts);
+  return result.stdout;
+}
+
+async function runApi(path: string, opts: ApiOptions): Promise<ExecResult> {
   const { ctx, method, fields } = opts;
   const args = [
     "api",
@@ -166,5 +183,5 @@ export async function glabApiJson<T = unknown>(
 
   const result = await run(args, ctx);
   throwOnFailure(result);
-  return parseJson<T>(result);
+  return result;
 }

@@ -12,5 +12,24 @@
     "sourceMap": true
   },
   "include": ["src/**/*.ts", "bin/**/*.ts"],
-  "exclude": ["node_modules", "dist", "test", "src/commands/api.ts", "src/commands/gist.ts", "src/commands/home.ts", "src/commands/issue.ts", "src/commands/label.ts", "src/commands/project.ts", "src/commands/release.ts", "src/commands/repo.ts", "src/commands/run.ts", "src/commands/search.ts", "src/commands/secret.ts", "src/commands/setup.ts", "src/commands/stack.ts", "src/commands/variable.ts", "src/commands/workflow.ts", "src/totals.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "src/commands/api.ts",
+    "src/commands/gist.ts",
+    "src/commands/home.ts",
+    "src/commands/issue.ts",
+    "src/commands/label.ts",
+    "src/commands/project.ts",
+    "src/commands/release.ts",
+    "src/commands/repo.ts",
+    "src/commands/search.ts",
+    "src/commands/secret.ts",
+    "src/commands/setup.ts",
+    "src/commands/stack.ts",
+    "src/commands/variable.ts",
+    "src/commands/workflow.ts",
+    "src/totals.ts"
+  ]
 }

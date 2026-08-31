@@ -6,6 +6,7 @@ import {
   glabRaw,
   glabExecWithStdin,
   glabApiJson,
+  glabApiText,
 } from "../src/glab.js";
 import type { RepoContext } from "../src/context.js";
 import { AxiError } from "../src/errors.js";
@@ -401,6 +402,35 @@ describe("glabApiJson", () => {
       expect.unreachable();
     } catch (e) {
       expect((e as AxiError).code).toBe("REPO_NOT_FOUND");
+    }
+  });
+});
+
+describe("glabApiText", () => {
+  beforeEach(() => {
+    mockedExecFile.mockReset();
+  });
+
+  it("returns the raw body of a non-JSON endpoint", async () => {
+    mockExecFileResult(null, "$ pytest\nFAILED test_x\n", "");
+    const ctx: RepoContext = { fullPath: "group/project", source: "flag" };
+    const trace = await glabApiText("projects/:id/jobs/7/trace", { ctx });
+    expect(trace).toBe("$ pytest\nFAILED test_x\n");
+    expect(callArgs()).toEqual([
+      "api",
+      "projects/group%2Fproject/jobs/7/trace",
+    ]);
+  });
+
+  it("maps glab api errors through mapGlabError", async () => {
+    const error = new Error("exit 1") as Error & { code: number };
+    error.code = 1;
+    mockExecFileResult(error, "", "glab: 404 Not Found (HTTP 404)");
+    try {
+      await glabApiText("projects/1/jobs/7/trace");
+      expect.unreachable();
+    } catch (e) {
+      expect((e as AxiError).code).toBe("NOT_FOUND");
     }
   });
 });

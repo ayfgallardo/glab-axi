@@ -6,6 +6,7 @@ import { VERSION } from "./version.js";
 import { withSuggestionHost } from "./suggestions.js";
 import { AxiError, exitCodeForError, StackError } from "./errors.js";
 import { mrCommand, MR_HELP } from "./commands/mr.js";
+import { ciCommand, CI_HELP } from "./commands/ci.js";
 
 export const DESCRIPTION =
   "Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.";
@@ -50,6 +51,7 @@ examples:
 
 const COMMAND_HELP: Record<string, string> = {
   mr: MR_HELP,
+  ci: CI_HELP,
 };
 
 type HostOnlyContext = { host: HostContext };
@@ -65,7 +67,7 @@ const notPorted = async (): Promise<string> => {
 const COMMANDS: Record<string, WrappedCommandFn> = {
   issue: withRepoContext(notPorted),
   mr: withRepoContext(mrCommand),
-  ci: withRepoContext(notPorted),
+  ci: withRepoContext(ciCommand),
   schedule: withRepoContext(notPorted),
   snippet: withRepoContext(notPorted),
   label: withRepoContext(notPorted),

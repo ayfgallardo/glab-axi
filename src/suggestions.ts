@@ -294,70 +294,79 @@ const table: SuggestionEntry[] = [
     ],
   },
 
-  // Run list
+  // CI list
   {
-    match: (c) => c.domain === "run" && c.action === "list",
+    match: (c) => c.domain === "ci" && c.action === "list" && !c.isEmpty,
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run view <id>\` to view details`,
-    ],
-  },
-
-  // Run view
-  {
-    match: (c) =>
-      c.domain === "run" && c.action === "view" && c.state === "completed",
-    lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run rerun ${c.id}\` to rerun`,
-      `Run \`glab-axi${repoFlag(c)} run view ${c.id} --log-failed\` to see failure logs`,
+      `Run \`glab-axi${repoFlag(c)} ci view <id>\` to view a pipeline and its jobs`,
+      `Run \`glab-axi${repoFlag(c)} ci status\` to see the pipeline of the current branch`,
     ],
   },
   {
     match: (c) =>
-      c.domain === "run" && c.action === "view" && c.state === "in_progress",
+      c.domain === "ci" && c.action === "list" && c.isEmpty === true,
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run watch ${c.id}\` to watch until completion`,
-      `Run \`glab-axi${repoFlag(c)} run cancel ${c.id}\` to cancel`,
-    ],
-  },
-  {
-    match: (c) => c.domain === "run" && c.action === "view",
-    lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run view ${c.id} --log\` to see run logs`,
+      `Run \`glab-axi${repoFlag(c)} ci run\` to trigger a pipeline`,
     ],
   },
 
-  // Run rerun/cancel/delete
+  // CI status / view — the running pipeline can still be watched or canceled
   {
-    match: (c) => c.domain === "run" && c.action === "rerun",
+    match: (c) =>
+      ["status", "view"].includes(c.action) &&
+      c.domain === "ci" &&
+      !["success", "failed", "canceled", "skipped"].includes(c.state ?? ""),
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run watch ${c.id}\` to monitor progress`,
+      `Run \`glab-axi${repoFlag(c)} ci watch ${c.id}\` to wait until the pipeline finishes`,
+      `Run \`glab-axi${repoFlag(c)} ci cancel ${c.id}\` to cancel it`,
     ],
   },
   {
-    match: (c) => c.domain === "run" && c.action === "cancel",
+    match: (c) =>
+      c.domain === "ci" && c.action === "view" && c.state === "failed",
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run view ${c.id}\` to see final state`,
+      `Run \`glab-axi${repoFlag(c)} ci retry ${c.id}\` to retry the failed jobs`,
     ],
   },
   {
-    match: (c) => c.domain === "run" && c.action === "delete",
+    match: (c) =>
+      c.domain === "ci" && c.action === "status" && c.state === "failed",
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run list\` to see remaining runs`,
+      `Run \`glab-axi${repoFlag(c)} ci view ${c.id}\` to see every job`,
+      `Run \`glab-axi${repoFlag(c)} ci retry ${c.id}\` to retry the failed jobs`,
     ],
   },
-
-  // Run watch
   {
-    match: (c) => c.domain === "run" && c.action === "watch",
+    match: (c) => c.domain === "ci" && c.action === "status",
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run view ${c.id}\` to see details`,
+      `Run \`glab-axi${repoFlag(c)} ci view ${c.id}\` to see every job`,
     ],
   },
-
-  // Run download
   {
-    match: (c) => c.domain === "run" && c.action === "download",
+    match: (c) => c.domain === "ci" && c.action === "view",
     lines: () => [],
+  },
+
+  // CI run/retry/watch/cancel
+  {
+    match: (c) =>
+      c.domain === "ci" && ["run", "retry"].includes(c.action) && !!c.id,
+    lines: (c) => [
+      `Run \`glab-axi${repoFlag(c)} ci watch ${c.id}\` to wait until it finishes`,
+    ],
+  },
+  {
+    match: (c) => c.domain === "ci" && c.action === "run",
+    lines: (c) => [
+      `Run \`glab-axi${repoFlag(c)} ci status\` to follow the new pipeline`,
+    ],
+  },
+  {
+    match: (c) =>
+      c.domain === "ci" && ["watch", "cancel", "retry"].includes(c.action),
+    lines: (c) => [
+      `Run \`glab-axi${repoFlag(c)} ci view ${c.id}\` to see the job breakdown`,
+    ],
   },
 
   // Workflow list
@@ -374,7 +383,6 @@ const table: SuggestionEntry[] = [
     match: (c) => c.domain === "workflow" && c.action === "view",
     lines: (c) => [
       `Run \`glab-axi${repoFlag(c)} workflow run ${c.id}\` to trigger`,
-      `Run \`glab-axi${repoFlag(c)} run list --workflow ${c.id}\` to see past runs`,
     ],
   },
 
@@ -382,7 +390,7 @@ const table: SuggestionEntry[] = [
   {
     match: (c) => c.domain === "workflow" && c.action === "run",
     lines: (c) => [
-      `Run \`glab-axi${repoFlag(c)} run list\` to see triggered run`,
+      `Run \`glab-axi${repoFlag(c)} ci list\` to see the triggered pipeline`,
     ],
   },
 
