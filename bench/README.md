@@ -46,6 +46,8 @@ dynamiquement en tête de script via `glab api`, pour que le benchmark reste rej
   vide de l'API brute (`[]`) ; mesure valide mais faible, à ne pas généraliser.
 - **`variable list`** : `glab` n'affiche jamais les valeurs des variables dans son tableau
   (`KEY/PROTECTED/MASKED/...`, pas de colonne valeur), alors que `glab-axi variable list`
-  affiche les valeurs en clair (comportement documenté dans `AGENTS.md` : les variables ne sont
-  pas traitées comme des secrets). C'est ce qui explique le delta très positif — comparaison
-  volontairement asymétrique en fonctionnalité, pas un artefact de mesure à corriger.
+  affiche en clair les valeurs des variables non `masked` (comportement documenté dans
+  `AGENTS.md` : une variable `masked` est affichée `[masked]` par défaut, `--show-values` la
+  révèle). Aucune variable du projet mesuré n'était `masked`, donc la mesure a été prise
+  valeurs affichées ; c'est ce qui explique le delta très positif — comparaison volontairement
+  asymétrique en fonctionnalité, pas un artefact de mesure à corriger.

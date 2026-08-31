@@ -89,6 +89,39 @@ describe("variableCommand", () => {
       expect(result).toContain("NODE_ENV");
       expect(result).toContain("production");
     });
+
+    it("hides masked values by default", async () => {
+      mockedApi.mockResolvedValueOnce([
+        variablePayload({ key: "SECRET", value: "sk-123", masked: true }),
+      ]);
+
+      const result = await variableCommand(["list"], ctx);
+
+      expect(result).toContain("[masked]");
+      expect(result).not.toContain("sk-123");
+      expect(result).toContain("--show-values");
+    });
+
+    it("reveals masked values with --show-values", async () => {
+      mockedApi.mockResolvedValueOnce([
+        variablePayload({ key: "SECRET", value: "sk-123", masked: true }),
+      ]);
+
+      const result = await variableCommand(["list", "--show-values"], ctx);
+
+      expect(result).toContain("sk-123");
+      expect(result).not.toContain("[masked]");
+    });
+
+    it("hides a masked variable with no value at all (GitLab 17.4+ masked and hidden)", async () => {
+      mockedApi.mockResolvedValueOnce([
+        variablePayload({ key: "SECRET", value: undefined, masked: true }),
+      ]);
+
+      const result = await variableCommand(["list"], ctx);
+
+      expect(result).toContain("[masked]");
+    });
   });
 
   describe("get", () => {
@@ -106,6 +139,24 @@ describe("variableCommand", () => {
       expect(apiPathsOf()).toEqual([
         "projects/:id/variables/NODE_ENV?filter%5Benvironment_scope%5D=production",
       ]);
+    });
+
+    it("hides a masked value by default and reveals it with --show-values", async () => {
+      mockedApi.mockResolvedValueOnce(
+        variablePayload({ key: "SECRET", value: "sk-123", masked: true }),
+      );
+      const hidden = await variableCommand(["get", "SECRET"], ctx);
+      expect(hidden).toContain("[masked]");
+      expect(hidden).not.toContain("sk-123");
+
+      mockedApi.mockResolvedValueOnce(
+        variablePayload({ key: "SECRET", value: "sk-123", masked: true }),
+      );
+      const revealed = await variableCommand(
+        ["get", "SECRET", "--show-values"],
+        ctx,
+      );
+      expect(revealed).toContain("sk-123");
     });
   });
 

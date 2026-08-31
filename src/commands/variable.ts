@@ -11,6 +11,7 @@ import {
 import {
   field,
   boolYesNo,
+  custom,
   renderList,
   renderDetail,
   renderHelp,
@@ -31,8 +32,8 @@ interface GlabVariable {
 }
 
 const VARIABLE_FLAGS: Record<string, readonly string[]> = {
-  list: ["--limit"],
-  get: ["--scope"],
+  list: ["--limit", "--show-values"],
+  get: ["--scope", "--show-values"],
   set: ["--masked", "--protected", "--scope"],
   delete: ["--scope"],
 };
@@ -42,24 +43,32 @@ subcommands[4]:
   list, get <name>, set <name>, delete <name>
 flags[1]:
   --scope <environment> (get/set/delete): the variable's environment_scope, defaults to * (all)
+flags{list,get}:
+  --show-values: reveal masked variable values, which \`list\`/\`get\` otherwise print as [masked]
 flags{set}:
   value is read only from piped stdin — never passed as a flag, since flags are visible in process argv
   --masked, --protected
-values are not secrets: \`list\`/\`get\` print them, matching \`glab variable list\`/\`get\`
+\`list\`/\`get\` print non-masked values in the clear, matching \`glab variable list\`/\`get\`; a
+masked variable's value shows as [masked] unless --show-values is passed
 examples:
   glab-axi variable list
+  glab-axi variable list --show-values
   glab-axi variable get NODE_ENV
   echo -n "production" | glab-axi variable set NODE_ENV
   echo -n "sk-..." | glab-axi variable set OPENAI_API_KEY --masked --protected
   glab-axi variable delete NODE_ENV --scope production`;
 
-const listSchema: FieldDef[] = [
-  field("key", "name"),
-  field("value"),
-  boolYesNo("masked"),
-  boolYesNo("protected"),
-  field("environment_scope", "scope"),
-];
+function variableSchema(reveal: boolean): FieldDef[] {
+  return [
+    field("key", "name"),
+    custom("value", (item: GlabVariable) =>
+      item.masked === true && !reveal ? "[masked]" : (item.value ?? null),
+    ),
+    boolYesNo("masked"),
+    boolYesNo("protected"),
+    field("environment_scope", "scope"),
+  ];
+}
 
 function scopeQuery(scope: string | undefined): string {
   return scope
@@ -67,11 +76,15 @@ function scopeQuery(scope: string | undefined): string {
     : "";
 }
 
+const MASKED_NOTICE =
+  "masked values hidden — pass --show-values to reveal them";
+
 async function listVariables(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
   const limit = resolveLimit(args, 100);
+  const reveal = takeBoolFlag(args, "--show-values");
   const variables = await glabApiJson<GlabVariable[]>(
     `projects/:id/variables?per_page=${limit}`,
     { ctx },
@@ -84,15 +97,18 @@ async function listVariables(
     isEmpty,
     repo: ctx,
   });
+  const hasMasked = variables.some((v) => v.masked === true);
+  if (hasMasked && !reveal) suggestions.unshift(MASKED_NOTICE);
   return renderOutput([
     countLine,
-    renderList("variables", variables, listSchema),
+    renderList("variables", variables, variableSchema(reveal)),
     renderHelp(suggestions),
   ]);
 }
 
 async function getVariable(args: string[], ctx?: RepoContext): Promise<string> {
   const scope = takeFlag(args, "--scope");
+  const reveal = takeBoolFlag(args, "--show-values");
   const positionals = args.filter((a) => !a.startsWith("-"));
   const name = positionals[0];
   if (!name) {
@@ -106,7 +122,11 @@ async function getVariable(args: string[], ctx?: RepoContext): Promise<string> {
     `projects/:id/variables/${encodeURIComponent(name)}${scopeQuery(scope)}`,
     { ctx },
   );
-  return renderOutput([renderDetail("variable", variable, listSchema)]);
+  const blocks = [renderDetail("variable", variable, variableSchema(reveal))];
+  if (variable.masked === true && !reveal) {
+    blocks.push(renderHelp([MASKED_NOTICE]));
+  }
+  return renderOutput(blocks);
 }
 
 /**
