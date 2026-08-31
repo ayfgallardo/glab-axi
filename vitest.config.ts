@@ -9,7 +9,6 @@ const NOT_PORTED_YET = [
   "test/commands/gist.test.ts",
   "test/commands/home.test.ts",
   "test/commands/project.test.ts",
-  "test/commands/release.test.ts",
   "test/commands/search.test.ts",
   "test/commands/secret.test.ts",
   "test/commands/stack.test.ts",

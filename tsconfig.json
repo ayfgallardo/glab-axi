@@ -20,7 +20,6 @@
     "src/commands/gist.ts",
     "src/commands/home.ts",
     "src/commands/project.ts",
-    "src/commands/release.ts",
     "src/commands/search.ts",
     "src/commands/secret.ts",
     "src/commands/setup.ts",

@@ -1,18 +1,16 @@
 import { encode } from "@toon-format/toon";
 import type { RepoContext } from "../context.js";
-import { ghJson, ghExec } from "../gh.js";
+import { glabApiJson, glabExec } from "../glab.js";
 import { AxiError } from "../errors.js";
 import {
-  getFlag,
-  hasFlag,
-  takeBoolFlag,
   takeFlag,
+  takeBoolFlag,
   rejectUnknownFlags,
+  resolveLimit,
 } from "../args.js";
 import { takeBody, truncateBody } from "../body.js";
 import {
   field,
-  boolYesNo,
   relativeTime,
   pluck,
   custom,
@@ -23,210 +21,127 @@ import {
   renderError,
   type FieldDef,
 } from "../toon.js";
+import { formatCountLine } from "../format.js";
 import { getSuggestions } from "../suggestions.js";
 
+interface GlabAuthor {
+  username?: string;
+}
+
+interface GlabRelease {
+  tag_name: string;
+  name?: string;
+  description?: string | null;
+  released_at?: string;
+  author?: GlabAuthor;
+}
+
 const RELEASE_FLAGS: Record<string, readonly string[]> = {
-  list: ["--limit", "--exclude-drafts", "--exclude-pre-releases"],
+  list: ["--limit"],
   view: ["--full"],
   create: [
     "--body",
     "--body-file",
     "--title",
-    "-t",
-    "--notes",
-    "-n",
-    "--notes-file",
-    "-F",
     "--target",
-    "--discussion-category",
-    "--notes-start-tag",
-    "--draft",
-    "-d",
-    "--prerelease",
-    "-p",
-    "--generate-notes",
-    "--verify-tag",
-    "--notes-from-tag",
-    "--fail-on-no-commits",
-    "--latest",
+    "--milestone",
+    "--released-at",
   ],
   edit: [
     "--body",
     "--body-file",
     "--title",
-    "--notes",
-    "-n",
-    "--notes-file",
-    "-F",
-    "--draft",
-    "--prerelease",
-    "--latest",
+    "--target",
+    "--milestone",
+    "--released-at",
   ],
-  delete: [],
+  delete: ["--with-tag"],
   download: ["--pattern", "--dir"],
   upload: [],
 };
 
-export const RELEASE_HELP = `usage: gh-axi release <subcommand> [flags]
+export const RELEASE_HELP = `usage: glab-axi release <subcommand> [flags]
 subcommands[7]:
-  list, view <tag>, create <tag>, edit <tag>, delete <tag>, download <tag>, upload <tag>
+  list, view <tag>, create <tag>, edit <tag>, delete <tag>, download [tag], upload <tag>
 flags{list}:
-  --exclude-drafts, --exclude-pre-releases, --limit (default 10)
+  --limit <n> (default 30)
 flags{view}:
   --full (show complete release notes without truncation)
 flags{create}:
-  --title/-t, --notes/-n or --body, --notes-file/-F or --body-file, --draft/-d, --prerelease/-p, --target, --generate-notes, --discussion-category, --notes-start-tag, --verify-tag, --notes-from-tag, --fail-on-no-commits, --latest[=true|false], <files...>
+  --title <text>, --body <text> or --body-file <path> (release notes), --target <ref>, --milestone <title>, --released-at <ISO8601>, <files...>
 flags{edit}:
-  --title, --notes/-n or --body, --notes-file/-F or --body-file, --draft[=true|false], --prerelease[=true|false], --latest[=true|false]
+  same as create — glab release create also updates an existing release
+flags{delete}:
+  --with-tag (also delete the underlying Git tag)
 flags{download}:
-  --pattern, --dir
+  --pattern <glob>, --dir <path>
+GitLab has no draft/prerelease concept: --draft, --prerelease, --generate-notes and friends have no equivalent and are not accepted.
 examples:
-  gh-axi release list --exclude-drafts
-  gh-axi release view v1.2.0 --full
-  gh-axi release create v1.3.0 --body-file notes.md --draft dist/app.zip
-  gh-axi release edit v1.3.0 --prerelease=false --latest`;
+  glab-axi release list
+  glab-axi release view v1.2.0 --full
+  glab-axi release create v1.3.0 --body-file notes.md dist/app.zip
+  glab-axi release edit v1.3.0 --title "v1.3.0 — fixes"`;
 
 const listSchema: FieldDef[] = [
-  field("tagName", "tag"),
+  field("tag_name", "tag"),
   field("name"),
-  boolYesNo("isDraft", "draft"),
-  boolYesNo("isPrerelease", "prerelease"),
-  relativeTime("publishedAt", "published"),
+  relativeTime("released_at", "released"),
+  pluck("author", "username", "author"),
 ];
 
 const viewSchema: FieldDef[] = [
-  field("tagName", "tag"),
+  field("tag_name", "tag"),
   field("name"),
-  relativeTime("publishedAt", "published"),
-  pluck("author", "login", "author"),
-  custom("body", (item) => truncateBody(item.body, 1000)),
+  relativeTime("released_at", "released"),
+  pluck("author", "username", "author"),
+  custom("body", (item: GlabRelease) => truncateBody(item.description, 1000)),
 ];
 
 const viewSchemaFull: FieldDef[] = [
-  field("tagName", "tag"),
+  field("tag_name", "tag"),
   field("name"),
-  relativeTime("publishedAt", "published"),
-  pluck("author", "login", "author"),
-  custom("body", (item) => (typeof item.body === "string" ? item.body : "")),
+  relativeTime("released_at", "released"),
+  pluck("author", "username", "author"),
+  custom("body", (item: GlabRelease) =>
+    typeof item.description === "string" ? item.description : "",
+  ),
 ];
 
-function takeFirstFlag(args: string[], flags: string[]): string | undefined {
-  for (const flag of flags) {
-    const value = takeFlag(args, flag);
-    if (value !== undefined) return value;
-  }
-  return undefined;
+function releasePath(tag: string, suffix = ""): string {
+  return `projects/:id/releases/${encodeURIComponent(tag)}${suffix}`;
 }
 
-function appendValueFlag(
-  ghArgs: string[],
-  args: string[],
-  outputFlag: string,
-  inputFlags: string[] = [outputFlag],
-): void {
-  const value = takeFirstFlag(args, inputFlags);
-  if (value !== undefined) ghArgs.push(outputFlag, value);
+async function fetchRelease(
+  tag: string,
+  ctx?: RepoContext,
+): Promise<GlabRelease> {
+  return glabApiJson<GlabRelease>(releasePath(tag), { ctx });
 }
 
-function appendBoolFlag(
-  ghArgs: string[],
-  args: string[],
-  outputFlag: string,
-  inputFlags: string[] = [outputFlag],
-): void {
-  if (inputFlags.some((flag) => takeBoolFlag(args, flag))) {
-    ghArgs.push(outputFlag);
-  }
-}
-
-function appendOptionalValueBoolFlag(
-  ghArgs: string[],
-  args: string[],
-  outputFlag: string,
-  inputFlags: string[] = [outputFlag],
-): void {
-  const occurrences = args.flatMap((arg, index) =>
-    inputFlags.some((flag) => arg === flag || arg.startsWith(`${flag}=`))
-      ? [index]
-      : [],
-  );
-  if (occurrences.length > 1) {
-    throw new AxiError(
-      `${outputFlag} may only be specified once`,
-      "VALIDATION_ERROR",
-    );
-  }
-  if (occurrences.length === 0) return;
-
-  const index = occurrences[0];
-  const arg = args[index];
-  const inputFlag = inputFlags.find(
-    (flag) => arg === flag || arg.startsWith(`${flag}=`),
-  )!;
-  ghArgs.push(
-    arg === inputFlag
-      ? outputFlag
-      : `${outputFlag}=${arg.slice(inputFlag.length + 1)}`,
-  );
-  args.splice(index, 1);
-}
-
-function findProvidedFlags(args: string[], flags: string[]): string[] {
-  return flags.filter((flag) =>
-    args.some((arg) => arg === flag || arg.startsWith(`${flag}=`)),
-  );
-}
-
-const RELEASE_NOTES_FLAGS = ["--notes", "-n", "--notes-file", "-F"];
-
-function takeReleaseBodyAlias(args: string[]): string | undefined {
-  return takeBody(args, {
-    label: "release notes",
-    valueBoundaryFlags: RELEASE_NOTES_FLAGS,
-  });
-}
-
-function assertNoReleaseNotesConflict(
-  body: string | undefined,
-  args: string[],
-  flags: string[],
-): void {
-  if (body === undefined) return;
-  const conflicts = findProvidedFlags(args, flags);
-  if (conflicts.length === 0) return;
-  throw new AxiError(
-    `Use only one release notes source: --body/--body-file cannot be combined with ${conflicts.join(", ")}`,
-    "VALIDATION_ERROR",
-    [
-      "Use --body-file <path> for file-backed release notes, or remove --body-file and use --notes-file <path>",
-    ],
-  );
+function appendNotesFlags(glabArgs: string[], args: string[]): void {
+  const body = takeBody(args, { label: "release notes" });
+  if (body !== undefined) glabArgs.push("--notes", body);
+  const title = takeFlag(args, "--title");
+  if (title) glabArgs.push("--name", title);
+  const target = takeFlag(args, "--target");
+  if (target) glabArgs.push("--ref", target);
+  const milestone = takeFlag(args, "--milestone");
+  if (milestone) glabArgs.push("--milestone", milestone);
+  const releasedAt = takeFlag(args, "--released-at");
+  if (releasedAt) glabArgs.push("--released-at", releasedAt);
 }
 
 async function listReleases(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
-  const limit = getFlag(args, "--limit") ?? "10";
-  const ghArgs = [
-    "release",
-    "list",
-    "--json",
-    "tagName,name,isDraft,isPrerelease,publishedAt",
-    "--limit",
-    limit,
-  ];
-  if (hasFlag(args, "--exclude-drafts")) ghArgs.push("--exclude-drafts");
-  if (hasFlag(args, "--exclude-pre-releases"))
-    ghArgs.push("--exclude-pre-releases");
-
-  const releases = await ghJson<Record<string, unknown>[]>(ghArgs, ctx);
+  const limit = resolveLimit(args, 30);
+  const releases = await glabApiJson<GlabRelease[]>(
+    `projects/:id/releases?per_page=${limit}`,
+    { ctx },
+  );
   const isEmpty = releases.length === 0;
-  const limitNum = Number(limit);
-  const countLine =
-    releases.length === limitNum
-      ? `count: ${releases.length} (showing first ${releases.length}; run \`gh-axi repo view\` for total count)`
-      : `count: ${releases.length}`;
+  const countLine = formatCountLine({ count: releases.length, limit });
   const suggestions = getSuggestions({
     domain: "release",
     action: "list",
@@ -241,20 +156,17 @@ async function listReleases(
 }
 
 async function viewRelease(args: string[], ctx?: RepoContext): Promise<string> {
-  const full = hasFlag(args, "--full");
-  const positionals = args.filter((a) => !a.startsWith("--"));
-  const tag = positionals[1];
-  if (!tag)
+  const full = takeBoolFlag(args, "--full");
+  const positionals = args.filter((a) => !a.startsWith("-"));
+  const tag = positionals[0];
+  if (!tag) {
     throw new AxiError(
-      "Tag is required: gh-axi release view <tag>",
+      "Tag is required: glab-axi release view <tag>",
       "VALIDATION_ERROR",
     );
+  }
 
-  const release = await ghJson<Record<string, unknown>>(
-    ["release", "view", tag, "--json", "tagName,name,publishedAt,author,body"],
-    ctx,
-  );
-
+  const release = await fetchRelease(tag, ctx);
   return renderOutput([
     renderDetail("release", release, full ? viewSchemaFull : viewSchema),
   ]);
@@ -264,46 +176,21 @@ async function createRelease(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
-  const remaining = args.slice(1);
-  const optionArgs: string[] = [];
-  const body = takeReleaseBodyAlias(remaining);
-  assertNoReleaseNotesConflict(body, remaining, RELEASE_NOTES_FLAGS);
-  if (body !== undefined) optionArgs.push("--notes", body);
-
-  appendValueFlag(optionArgs, remaining, "--title", ["--title", "-t"]);
-  appendValueFlag(optionArgs, remaining, "--notes", ["--notes", "-n"]);
-  appendValueFlag(optionArgs, remaining, "--notes-file", [
-    "--notes-file",
-    "-F",
-  ]);
-  appendValueFlag(optionArgs, remaining, "--target");
-  appendValueFlag(optionArgs, remaining, "--discussion-category");
-  appendValueFlag(optionArgs, remaining, "--notes-start-tag");
-  appendBoolFlag(optionArgs, remaining, "--draft", ["--draft", "-d"]);
-  appendBoolFlag(optionArgs, remaining, "--prerelease", ["--prerelease", "-p"]);
-  appendBoolFlag(optionArgs, remaining, "--generate-notes");
-  appendBoolFlag(optionArgs, remaining, "--verify-tag");
-  appendBoolFlag(optionArgs, remaining, "--notes-from-tag");
-  appendBoolFlag(optionArgs, remaining, "--fail-on-no-commits");
-  appendOptionalValueBoolFlag(optionArgs, remaining, "--latest");
-
-  const positionals = remaining.filter((a) => !a.startsWith("-"));
+  const notesArgs: string[] = [];
+  appendNotesFlags(notesArgs, args);
+  const positionals = args.filter((a) => !a.startsWith("-"));
   const tag = positionals[0];
-  if (!tag)
+  if (!tag) {
     throw new AxiError(
-      "Tag is required: gh-axi release create <tag>",
+      "Tag is required: glab-axi release create <tag>",
       "VALIDATION_ERROR",
     );
+  }
+  const files = positionals.slice(1);
 
-  const ghArgs = [
-    "release",
-    "create",
-    tag,
-    ...optionArgs,
-    ...positionals.slice(1),
-  ];
+  const glabArgs = ["release", "create", tag, ...notesArgs, ...files];
 
-  await ghExec(ghArgs, ctx);
+  await glabExec(glabArgs, ctx);
   const suggestions = getSuggestions({
     domain: "release",
     action: "create",
@@ -317,33 +204,22 @@ async function createRelease(
 }
 
 async function editRelease(args: string[], ctx?: RepoContext): Promise<string> {
-  const remaining = [...args];
-  const body = takeReleaseBodyAlias(remaining);
-  assertNoReleaseNotesConflict(body, remaining, RELEASE_NOTES_FLAGS);
-  const optionArgs: string[] = [];
-  appendValueFlag(optionArgs, remaining, "--title");
-  if (body !== undefined) optionArgs.push("--notes", body);
-  appendValueFlag(optionArgs, remaining, "--notes", ["--notes", "-n"]);
-  appendValueFlag(optionArgs, remaining, "--notes-file", [
-    "--notes-file",
-    "-F",
-  ]);
-  // gh accepts --flag=false to unset these; takeBoolFlag would drop that form
-  // and the edit would silently no-op (prints the tag, changes nothing).
-  appendOptionalValueBoolFlag(optionArgs, remaining, "--draft");
-  appendOptionalValueBoolFlag(optionArgs, remaining, "--prerelease");
-  appendOptionalValueBoolFlag(optionArgs, remaining, "--latest");
-  const positionals = remaining.filter((a) => !a.startsWith("-"));
-  const tag = positionals[1];
-  if (!tag)
+  const notesArgs: string[] = [];
+  appendNotesFlags(notesArgs, args);
+  const positionals = args.filter((a) => !a.startsWith("-"));
+  const tag = positionals[0];
+  if (!tag) {
     throw new AxiError(
-      "Tag is required: gh-axi release edit <tag>",
+      "Tag is required: glab-axi release edit <tag>",
       "VALIDATION_ERROR",
     );
+  }
 
-  const ghArgs = ["release", "edit", tag, ...optionArgs];
+  // GitLab has no dedicated update endpoint: `glab release create` also
+  // updates an existing release when its tag already exists.
+  const glabArgs = ["release", "create", tag, ...notesArgs];
 
-  await ghExec(ghArgs, ctx);
+  await glabExec(glabArgs, ctx);
   const suggestions = getSuggestions({
     domain: "release",
     action: "edit",
@@ -357,20 +233,18 @@ async function deleteRelease(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
-  const positionals = args.filter((a) => !a.startsWith("--"));
-  const tag = positionals[1];
-  if (!tag)
+  const withTag = takeBoolFlag(args, "--with-tag");
+  const positionals = args.filter((a) => !a.startsWith("-"));
+  const tag = positionals[0];
+  if (!tag) {
     throw new AxiError(
-      "Tag is required: gh-axi release delete <tag>",
+      "Tag is required: glab-axi release delete <tag>",
       "VALIDATION_ERROR",
     );
+  }
 
-  // Idempotent: check if release exists before deleting
   try {
-    await ghJson<Record<string, unknown>>(
-      ["release", "view", tag, "--json", "tagName"],
-      ctx,
-    );
+    await fetchRelease(tag, ctx);
   } catch (err) {
     if (err instanceof AxiError && err.code === "NOT_FOUND") {
       const suggestions = getSuggestions({
@@ -387,7 +261,9 @@ async function deleteRelease(
     throw err;
   }
 
-  await ghExec(["release", "delete", tag, "--yes"], ctx);
+  const glabArgs = ["release", "delete", tag, "--yes"];
+  if (withTag) glabArgs.push("--with-tag");
+  await glabExec(glabArgs, ctx);
   const suggestions = getSuggestions({
     domain: "release",
     action: "delete",
@@ -401,21 +277,17 @@ async function downloadRelease(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
-  const positionals = args.filter((a) => !a.startsWith("--"));
-  const tag = positionals[1];
-  if (!tag)
-    throw new AxiError(
-      "Tag is required: gh-axi release download <tag>",
-      "VALIDATION_ERROR",
-    );
+  const positionals = args.filter((a) => !a.startsWith("-"));
+  const tag = positionals[0];
 
-  const ghArgs = ["release", "download", tag];
-  const pattern = getFlag(args, "--pattern");
-  if (pattern) ghArgs.push("--pattern", pattern);
-  const dir = getFlag(args, "--dir");
-  if (dir) ghArgs.push("--dir", dir);
+  const glabArgs = ["release", "download"];
+  if (tag) glabArgs.push(tag);
+  const pattern = takeFlag(args, "--pattern");
+  if (pattern) glabArgs.push("--asset-name", pattern);
+  const dir = takeFlag(args, "--dir");
+  if (dir) glabArgs.push("--dir", dir);
 
-  await ghExec(ghArgs, ctx);
+  await glabExec(glabArgs, ctx);
   const suggestions = getSuggestions({
     domain: "release",
     action: "download",
@@ -423,7 +295,7 @@ async function downloadRelease(
     repo: ctx,
   });
   return renderOutput([
-    encode({ download: "ok", tag }),
+    encode({ download: "ok", tag: tag ?? "latest" }),
     renderHelp(suggestions),
   ]);
 }
@@ -432,22 +304,23 @@ async function uploadRelease(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
-  const positionals = args.filter((a) => !a.startsWith("--"));
-  const tag = positionals[1];
-  if (!tag)
+  const positionals = args.filter((a) => !a.startsWith("-"));
+  const tag = positionals[0];
+  if (!tag) {
     throw new AxiError(
-      "Tag is required: gh-axi release upload <tag> <files...>",
+      "Tag is required: glab-axi release upload <tag> <files...>",
       "VALIDATION_ERROR",
     );
-
-  const files = positionals.slice(2);
-  if (files.length === 0)
+  }
+  const files = positionals.slice(1);
+  if (files.length === 0) {
     throw new AxiError(
-      "At least one file is required: gh-axi release upload <tag> <files...>",
+      "At least one file is required: glab-axi release upload <tag> <files...>",
       "VALIDATION_ERROR",
     );
+  }
 
-  await ghExec(["release", "upload", tag, ...files], ctx);
+  await glabExec(["release", "upload", tag, ...files], ctx);
   const suggestions = getSuggestions({
     domain: "release",
     action: "upload",
@@ -468,48 +341,29 @@ export async function releaseCommand(
 
   if (sub === "--help" || sub === undefined) return RELEASE_HELP;
 
+  const rest = args.slice(1);
   switch (sub) {
     case "list":
-      rejectUnknownFlags(args.slice(1), RELEASE_FLAGS.list, "release", "list");
-      return listReleases(args, ctx);
+      rejectUnknownFlags(rest, RELEASE_FLAGS.list, "release", "list");
+      return listReleases(rest, ctx);
     case "view":
-      rejectUnknownFlags(args.slice(1), RELEASE_FLAGS.view, "release", "view");
-      return viewRelease(args, ctx);
+      rejectUnknownFlags(rest, RELEASE_FLAGS.view, "release", "view");
+      return viewRelease(rest, ctx);
     case "create":
-      rejectUnknownFlags(
-        args.slice(1),
-        RELEASE_FLAGS.create,
-        "release",
-        "create",
-      );
-      return createRelease(args, ctx);
+      rejectUnknownFlags(rest, RELEASE_FLAGS.create, "release", "create");
+      return createRelease(rest, ctx);
     case "edit":
-      rejectUnknownFlags(args.slice(1), RELEASE_FLAGS.edit, "release", "edit");
-      return editRelease(args, ctx);
+      rejectUnknownFlags(rest, RELEASE_FLAGS.edit, "release", "edit");
+      return editRelease(rest, ctx);
     case "delete":
-      rejectUnknownFlags(
-        args.slice(1),
-        RELEASE_FLAGS.delete,
-        "release",
-        "delete",
-      );
-      return deleteRelease(args, ctx);
+      rejectUnknownFlags(rest, RELEASE_FLAGS.delete, "release", "delete");
+      return deleteRelease(rest, ctx);
     case "download":
-      rejectUnknownFlags(
-        args.slice(1),
-        RELEASE_FLAGS.download,
-        "release",
-        "download",
-      );
-      return downloadRelease(args, ctx);
+      rejectUnknownFlags(rest, RELEASE_FLAGS.download, "release", "download");
+      return downloadRelease(rest, ctx);
     case "upload":
-      rejectUnknownFlags(
-        args.slice(1),
-        RELEASE_FLAGS.upload,
-        "release",
-        "upload",
-      );
-      return uploadRelease(args, ctx);
+      rejectUnknownFlags(rest, RELEASE_FLAGS.upload, "release", "upload");
+      return uploadRelease(rest, ctx);
     default:
       return renderError(`Unknown subcommand: ${sub}`, "VALIDATION_ERROR", [
         "Available subcommands: list, view, create, edit, delete, download, upload",

@@ -28,6 +28,7 @@ import { CI_HELP } from "../src/commands/ci.js";
 import { SCHEDULE_HELP } from "../src/commands/schedule.js";
 import { REPO_HELP } from "../src/commands/repo.js";
 import { LABEL_HELP } from "../src/commands/label.js";
+import { RELEASE_HELP } from "../src/commands/release.js";
 import { resolveRepo } from "../src/context.js";
 import { AxiError, StackError } from "../src/errors.js";
 import { encode } from "@toon-format/toon";
@@ -161,7 +162,15 @@ describe("main CLI", () => {
     const options = await cliOptions();
     const ctx = { fullPath: "group/project", source: "git" };
 
-    const ported = ["issue", "mr", "ci", "schedule", "repo", "label"];
+    const ported = [
+      "issue",
+      "mr",
+      "ci",
+      "schedule",
+      "repo",
+      "label",
+      "release",
+    ];
     for (const command of COMMAND_NAMES.filter(
       (name) => !ported.includes(name),
     )) {
@@ -207,6 +216,13 @@ describe("main CLI", () => {
 
     expect(await options.commands.label(["--help"])).toBe(LABEL_HELP);
     expect(options.getCommandHelp("label")).toBe(LABEL_HELP);
+  });
+
+  it("routes release to the ported command and exposes its help", async () => {
+    const options = await cliOptions();
+
+    expect(await options.commands.release(["--help"])).toBe(RELEASE_HELP);
+    expect(options.getCommandHelp("release")).toBe(RELEASE_HELP);
   });
 
   it("keeps stack commands cwd-bound", async () => {
