@@ -277,14 +277,14 @@ async function downloadRelease(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
+  const pattern = takeFlag(args, "--pattern");
+  const dir = takeFlag(args, "--dir");
   const positionals = args.filter((a) => !a.startsWith("-"));
   const tag = positionals[0];
 
   const glabArgs = ["release", "download"];
   if (tag) glabArgs.push(tag);
-  const pattern = takeFlag(args, "--pattern");
   if (pattern) glabArgs.push("--asset-name", pattern);
-  const dir = takeFlag(args, "--dir");
   if (dir) glabArgs.push("--dir", dir);
 
   await glabExec(glabArgs, ctx);

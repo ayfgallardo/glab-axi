@@ -101,6 +101,9 @@ async function createLabel(args: string[], ctx?: RepoContext): Promise<string> {
 }
 
 async function editLabel(args: string[], ctx?: RepoContext): Promise<string> {
+  const newName = takeFlag(args, "--name");
+  const color = takeFlag(args, "--color");
+  const description = takeFlag(args, "--description");
   const positionals = args.filter((a) => !a.startsWith("-"));
   const labelName = positionals[0];
   if (!labelName) {
@@ -111,11 +114,8 @@ async function editLabel(args: string[], ctx?: RepoContext): Promise<string> {
   }
 
   const glabArgs = ["label", "edit", "--label-id", labelName];
-  const newName = takeFlag(args, "--name");
   if (newName) glabArgs.push("--new-name", newName);
-  const color = takeFlag(args, "--color");
   if (color) glabArgs.push("--color", color);
-  const description = takeFlag(args, "--description");
   if (description) glabArgs.push("--description", description);
 
   await glabExec(glabArgs, ctx);

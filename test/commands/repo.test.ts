@@ -101,6 +101,20 @@ describe("repoCommand", () => {
       ]);
       expect(result).toContain("created: ok");
     });
+
+    it("does not swallow the name when a valued flag comes before it", async () => {
+      mockedExec.mockResolvedValueOnce("");
+
+      await repoCommand(["create", "--description", "hi", "my-project"], ctx);
+
+      expect(execArgsOf()).toEqual([
+        "repo",
+        "create",
+        "my-project",
+        "--description",
+        "hi",
+      ]);
+    });
   });
 
   describe("edit", () => {

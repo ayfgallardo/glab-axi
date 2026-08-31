@@ -208,6 +208,20 @@ describe("releaseCommand", () => {
         "out",
       ]);
     });
+
+    it("does not swallow the tag when --dir comes before it", async () => {
+      mockedExec.mockResolvedValueOnce("");
+
+      await releaseCommand(["download", "--dir", "out", "v1.3.0"], ctx);
+
+      expect(execArgsOf()).toEqual([
+        "release",
+        "download",
+        "v1.3.0",
+        "--dir",
+        "out",
+      ]);
+    });
   });
 
   describe("upload", () => {

@@ -123,6 +123,21 @@ describe("labelCommand", () => {
         "critical-bug",
       ]);
     });
+
+    it("does not swallow the label name when a valued flag comes before it", async () => {
+      mockedExec.mockResolvedValueOnce("");
+
+      await labelCommand(["edit", "--color", "#ff0000", "bug"], ctx);
+
+      expect(execArgsOf()).toEqual([
+        "label",
+        "edit",
+        "--label-id",
+        "bug",
+        "--color",
+        "#ff0000",
+      ]);
+    });
   });
 
   describe("delete", () => {

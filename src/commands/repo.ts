@@ -85,6 +85,11 @@ async function viewRepo(_args: string[], ctx?: RepoContext): Promise<string> {
 }
 
 async function createRepo(args: string[], ctx?: RepoContext): Promise<string> {
+  const isPublic = takeBoolFlag(args, "--public");
+  const isPrivate = takeBoolFlag(args, "--private");
+  const isInternal = takeBoolFlag(args, "--internal");
+  const description = takeFlag(args, "--description");
+  const group = takeFlag(args, "--group");
   const positionals = args.filter((a) => !a.startsWith("-"));
   const name = positionals[0];
   if (!name) {
@@ -95,12 +100,10 @@ async function createRepo(args: string[], ctx?: RepoContext): Promise<string> {
   }
 
   const glabArgs = ["repo", "create", name];
-  if (takeBoolFlag(args, "--public")) glabArgs.push("--public");
-  else if (takeBoolFlag(args, "--private")) glabArgs.push("--private");
-  else if (takeBoolFlag(args, "--internal")) glabArgs.push("--internal");
-  const description = takeFlag(args, "--description");
+  if (isPublic) glabArgs.push("--public");
+  else if (isPrivate) glabArgs.push("--private");
+  else if (isInternal) glabArgs.push("--internal");
   if (description) glabArgs.push("--description", description);
-  const group = takeFlag(args, "--group");
   if (group) glabArgs.push("--group", group);
 
   await glabExec(glabArgs);
