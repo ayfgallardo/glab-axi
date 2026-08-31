@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { encode } from "@toon-format/toon";
-import type { RepoContext } from "../context.js";
+import { resolveCurrentBranch, type RepoContext } from "../context.js";
 import { glabApiJson, glabApiText, glabExec } from "../glab.js";
 import { isCancelNoop, isWatchTerminal } from "../pipelineStatus.js";
 import { AxiError } from "../errors.js";
@@ -182,7 +182,7 @@ note:
 flags{list}:
   --status <running|pending|success|failed|canceled|skipped|...>, --ref <branch|tag>, --source <push|merge_request_event|schedule|...>, --username, --sha, --scope <running|pending|finished|branches|tags>, --limit <n> (default 20, max 100), --fields <a,b,c>
 flags{status}:
-  --branch <name> (default: the project's default branch)
+  --branch <name> (default: the branch checked out here, even with -R; outside a checkout, the project's most recent pipeline)
 flags{view}:
   --job <job-id> (show a single job), --status <status> (filter the job list)
 flags{watch}:
@@ -243,29 +243,43 @@ async function ciList(args: string[], ctx?: RepoContext): Promise<string> {
 }
 
 async function ciStatus(args: string[], ctx?: RepoContext): Promise<string> {
-  const branch = takeFlag(args, "--branch");
-  const path = branch
-    ? `projects/:id/pipelines/latest?${new URLSearchParams({ ref: branch })}`
-    : "projects/:id/pipelines/latest";
+  // An agent asking for "the pipeline" means the one for the branch it is on;
+  // outside a checkout there is none to name, and the query stays unfiltered.
+  const branch = takeFlag(args, "--branch") ?? resolveCurrentBranch();
 
-  const pipeline = await glabApiJson<Pipeline>(path, { ctx });
+  // The list endpoint answers 200 + [] for a ref with no pipeline, where
+  // `pipelines/latest` answers 403 and hides a real permission problem.
+  const query = new URLSearchParams({ per_page: "1" });
+  if (branch) query.set("ref", branch);
+  const [pipeline] = await glabApiJson<Pipeline[]>(
+    `projects/:id/pipelines?${query.toString()}`,
+    { ctx },
+  );
+
+  if (!pipeline) {
+    return renderOutput([
+      encode({ ci_status: `no pipeline for ${branch ?? "this project"}` }),
+      renderHelp([
+        `Run \`glab-axi ci list${repoArg(ctx)}\` to see pipelines on other refs`,
+      ]),
+    ]);
+  }
+
   const jobs = await fetchJobs(pipeline.id, ctx);
-
-  const suggestions = [
-    ...failedJobSuggestions(jobs, ctx),
-    ...getSuggestions({
-      domain: "ci",
-      action: "status",
-      id: pipeline.id,
-      state: pipeline.status,
-      repo: ctx,
-    }),
-  ];
 
   return renderOutput([
     renderDetail("pipeline", pipeline, pipelineSchema),
     renderList("jobs", jobs, jobSchema),
-    renderHelp(suggestions),
+    renderHelp([
+      ...failedJobSuggestions(jobs, ctx),
+      ...getSuggestions({
+        domain: "ci",
+        action: "status",
+        id: pipeline.id,
+        state: pipeline.status,
+        repo: ctx,
+      }),
+    ]),
   ]);
 }
 

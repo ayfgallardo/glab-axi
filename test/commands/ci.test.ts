@@ -9,7 +9,12 @@ vi.mock("../../src/glab.js", () => ({
   glabExec: vi.fn(),
 }));
 
+vi.mock("../../src/context.js", () => ({
+  resolveCurrentBranch: vi.fn(),
+}));
+
 import { glabApiJson, glabApiText, glabExec } from "../../src/glab.js";
+import { resolveCurrentBranch } from "../../src/context.js";
 import { ciCommand, CI_HELP } from "../../src/commands/ci.js";
 import { AxiError } from "../../src/errors.js";
 import type { RepoContext } from "../../src/context.js";
@@ -17,6 +22,7 @@ import type { RepoContext } from "../../src/context.js";
 const mockedApi = vi.mocked(glabApiJson);
 const mockedText = vi.mocked(glabApiText);
 const mockedExec = vi.mocked(glabExec);
+const mockedBranch = vi.mocked(resolveCurrentBranch);
 
 const ctx: RepoContext = { fullPath: "group/sub/project", source: "flag" };
 
@@ -135,31 +141,53 @@ describe("ciCommand", () => {
   });
 
   describe("status", () => {
-    it("reads the latest pipeline for the default branch", async () => {
+    it("reads the most recent pipeline of the current branch", async () => {
+      mockedBranch.mockReturnValue("feat/x");
       mockedApi
-        .mockResolvedValueOnce(pipeline())
+        .mockResolvedValueOnce([pipeline()])
         .mockResolvedValueOnce([job()]);
 
       const result = await ciCommand(["status"], ctx);
 
-      expect(apiPathsOf()[0]).toBe("projects/:id/pipelines/latest");
+      expect(apiPathsOf()[0]).toBe(
+        "projects/:id/pipelines?per_page=1&ref=feat%2Fx",
+      );
       expect(result).toContain("52377");
       expect(result).toContain("build");
     });
 
-    it("scopes the latest pipeline to --branch", async () => {
-      mockedApi.mockResolvedValueOnce(pipeline()).mockResolvedValueOnce([]);
+    it("scopes to --branch over the checkout", async () => {
+      mockedBranch.mockReturnValue("feat/x");
+      mockedApi.mockResolvedValueOnce([pipeline()]).mockResolvedValueOnce([]);
 
-      await ciCommand(["status", "--branch", "feat/x"], ctx);
+      await ciCommand(["status", "--branch", "main"], ctx);
 
-      expect(apiPathsOf()[0]).toBe(
-        "projects/:id/pipelines/latest?ref=feat%2Fx",
-      );
+      expect(apiPathsOf()[0]).toBe("projects/:id/pipelines?per_page=1&ref=main");
+    });
+
+    it("leaves the query unfiltered outside a checkout", async () => {
+      mockedBranch.mockReturnValue(undefined);
+      mockedApi.mockResolvedValueOnce([pipeline()]).mockResolvedValueOnce([]);
+
+      await ciCommand(["status"], ctx);
+
+      expect(apiPathsOf()[0]).toBe("projects/:id/pipelines?per_page=1");
+    });
+
+    it("reports a ref without any pipeline instead of failing", async () => {
+      mockedBranch.mockReturnValue("feat/x");
+      mockedApi.mockResolvedValueOnce([]);
+
+      const result = await ciCommand(["status"], ctx);
+
+      expect(result).toContain("no pipeline for feat/x");
+      expect(mockedApi).toHaveBeenCalledTimes(1);
     });
 
     it("suggests reading the log of a failed job", async () => {
+      mockedBranch.mockReturnValue("main");
       mockedApi
-        .mockResolvedValueOnce(pipeline({ status: "failed" }))
+        .mockResolvedValueOnce([pipeline({ status: "failed" })])
         .mockResolvedValueOnce([
           job(),
           job({ id: 199507, name: "test", status: "failed" }),

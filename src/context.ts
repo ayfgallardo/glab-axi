@@ -34,6 +34,19 @@ export function resolveRepo(flagValue?: string): RepoContext | undefined {
   }
 }
 
+/** The checked-out branch, or undefined outside a repo and on a detached HEAD. */
+export function resolveCurrentBranch(): string | undefined {
+  try {
+    const branch = execFileSync("git", ["branch", "--show-current"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return branch || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The `:id` a GitLab REST path expects: the project path, URL-encoded. */
 export function encodedProjectId(ctx: RepoContext): string {
   return encodeURIComponent(ctx.fullPath);

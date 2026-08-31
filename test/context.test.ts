@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { encodedProjectId, resolveRepo } from "../src/context.js";
+import {
+  encodedProjectId,
+  resolveCurrentBranch,
+  resolveRepo,
+} from "../src/context.js";
 
 vi.mock("node:child_process", () => ({
   execFileSync: vi.fn(),
@@ -150,5 +154,33 @@ describe("encodedProjectId", () => {
     expect(encodedProjectId({ fullPath: "a/b/c", source: "git" })).toBe(
       "a%2Fb%2Fc",
     );
+  });
+});
+
+describe("resolveCurrentBranch", () => {
+  beforeEach(() => {
+    mockedExecFileSync.mockReset();
+  });
+
+  it("returns the checked-out branch", () => {
+    mockedExecFileSync.mockReturnValue("feat/pipelines\n");
+    expect(resolveCurrentBranch()).toBe("feat/pipelines");
+    expect(mockedExecFileSync).toHaveBeenCalledWith(
+      "git",
+      ["branch", "--show-current"],
+      expect.anything(),
+    );
+  });
+
+  it("returns undefined on a detached HEAD", () => {
+    mockedExecFileSync.mockReturnValue("\n");
+    expect(resolveCurrentBranch()).toBeUndefined();
+  });
+
+  it("returns undefined outside a git repository", () => {
+    mockedExecFileSync.mockImplementation(() => {
+      throw new Error("not a git repo");
+    });
+    expect(resolveCurrentBranch()).toBeUndefined();
   });
 });
