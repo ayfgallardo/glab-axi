@@ -1,4 +1,4 @@
-// Generates the minimal skills/gh-axi/SKILL.md stub from src/skill.ts.
+// Generates the minimal skills/glab-axi/SKILL.md stub from src/skill.ts.
 // The skill defers to CLI output for all actual guidance, so a regeneration
 // cannot re-inflate it with dashboard / --help / per-command help text.
 //
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { createSkillMarkdown } from "../src/skill.js";
 
-const target = new URL("../skills/gh-axi/SKILL.md", import.meta.url);
+const target = new URL("../skills/glab-axi/SKILL.md", import.meta.url);
 const expected = createSkillMarkdown();
 const check = process.argv.includes("--check");
 
@@ -22,13 +22,13 @@ if (check) {
   }
   if (actual !== expected) {
     console.error(
-      "skills/gh-axi/SKILL.md is out of date. Run `pnpm run build:skill` and commit the result.",
+      "skills/glab-axi/SKILL.md is out of date. Run `pnpm run build:skill` and commit the result.",
     );
     process.exit(1);
   }
-  console.log("skills/gh-axi/SKILL.md is up to date.");
+  console.log("skills/glab-axi/SKILL.md is up to date.");
 } else {
-  await mkdir(new URL("../skills/gh-axi/", import.meta.url), {
+  await mkdir(new URL("../skills/glab-axi/", import.meta.url), {
     recursive: true,
   });
   await writeFile(target, expected);

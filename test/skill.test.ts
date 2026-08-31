@@ -28,9 +28,9 @@ function skillBody(markdown: string): string {
 }
 
 describe("createSkillMarkdown", () => {
-  it("matches the committed skills/gh-axi/SKILL.md", () => {
+  it("matches the committed skills/glab-axi/SKILL.md", () => {
     const committed = readFileSync(
-      new URL("../skills/gh-axi/SKILL.md", import.meta.url),
+      new URL("../skills/glab-axi/SKILL.md", import.meta.url),
       "utf8",
     );
     expect(committed).toBe(createSkillMarkdown());
@@ -40,7 +40,7 @@ describe("createSkillMarkdown", () => {
     const markdown = createSkillMarkdown();
     const frontmatter = parseFrontmatter(markdown);
     expect(frontmatter).toEqual({
-      name: "gh-axi",
+      name: "glab-axi",
       description: SKILL_DESCRIPTION,
       "user-invocable": false,
       author: SKILL_AUTHOR,
@@ -60,15 +60,14 @@ describe("createSkillMarkdown", () => {
     const hermes = (frontmatter.metadata as { hermes: Record<string, unknown> })
       .hermes;
     expect(hermes.tags).toEqual([
-      "github",
+      "gitlab",
       "git",
       "ci",
-      "pull-requests",
+      "merge-requests",
       "releases",
-      "projects",
     ]);
     expect(hermes.category).toBe("devops");
-    // gh-axi authenticates via the gh CLI, not an API-key env var.
+    // glab-axi authenticates via the glab CLI, not an API-key env var.
     expect(frontmatter).not.toHaveProperty("required_environment_variables");
   });
 
@@ -77,13 +76,16 @@ describe("createSkillMarkdown", () => {
     const body = skillBody(markdown);
     expect(markdown.length).toBeLessThanOrEqual(MAX_SKILL_MARKDOWN_CHARS);
     expect(body).toContain(DESCRIPTION);
-    expect(body).toMatch(/whenever a task touches GitHub/i);
-    expect(body).toContain("npx -y gh-axi");
-    expect(body).toContain("npx -y gh-axi --help");
-    expect(body).toContain("npx -y gh-axi <command> --help");
+    expect(body).toMatch(/whenever a task touches GitLab/i);
+    // Never npx: the package is not published to npm.
+    expect(body).not.toContain("npx");
+    expect(body).toContain("`glab-axi` for a dashboard");
+    expect(body).toContain("`glab-axi --help`");
+    expect(body).toContain("`glab-axi <command> --help`");
     expect(body).toMatch(/stale/i);
+    expect(body).toMatch(/must be on your PATH/i);
     expect(body).toMatch(
-      /- `npx -y gh-axi <command> --help` for per-command usage\n$/,
+      /- `glab-axi <command> --help` for per-command usage\n$/,
     );
   });
 
