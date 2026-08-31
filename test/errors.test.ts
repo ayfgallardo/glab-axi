@@ -175,6 +175,35 @@ describe("mapGlabError", () => {
     expect(err.code).toBe("UNKNOWN");
     expect(err.message).toBe("first line");
   });
+
+  it("extracts a JSON error body's `error` field, not just `message`", () => {
+    const err = mapGlabError(
+      '{"error":"files, content are missing, exactly one parameter must be provided"}glab: HTTP 400',
+      1,
+    );
+    expect(err.code).toBe("VALIDATION_ERROR");
+    expect(err.message).toBe(
+      "files, content are missing, exactly one parameter must be provided",
+    );
+  });
+
+  it("prefers a boxed ERROR banner's content over a flat context line before it", () => {
+    const stderr = [
+      "Failed to create merge request. Created recovery file: /Users/x/mr.json",
+      "Run the command again with the '--recover' option to retry.",
+      "          ",
+      "   ERROR  ",
+      "          ",
+      "  None of the git remotes configured for this repository correspond to the GITLAB_HOST environment variable. Try      ",
+      "  adding a matching remote or unsetting the variable.",
+    ].join("\n");
+    const err = mapGlabError(stderr, 1);
+    expect(err.code).toBe("REPO_RESOLUTION");
+    expect(err.message).toBe(
+      "None of the git remotes configured for this repository correspond to the GITLAB_HOST environment variable. Try adding a matching remote or unsetting the variable.",
+    );
+    expect(err.suggestions.length).toBeGreaterThan(0);
+  });
 });
 
 describe("glabNotInstalledError", () => {
