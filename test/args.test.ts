@@ -10,6 +10,8 @@ import {
   getPositional,
   requireNumber,
   rejectUnknownFlags,
+  resolveLimit,
+  PER_PAGE_MAX,
 } from "../src/args.js";
 import { AxiError } from "../src/errors.js";
 
@@ -369,5 +371,31 @@ describe("requireNumber", () => {
         rejectUnknownFlags(["--", "--not-a-flag"], [], "repo", "view"),
       ).not.toThrow();
     });
+  });
+});
+
+describe("resolveLimit", () => {
+  it("returns the fallback when --limit is absent", () => {
+    expect(resolveLimit([], 30)).toBe(30);
+  });
+
+  it("returns the parsed --limit value and removes it from args", () => {
+    const args = ["--limit", "5"];
+    expect(resolveLimit(args, 30)).toBe(5);
+    expect(args).toEqual([]);
+  });
+
+  it("clamps --limit to PER_PAGE_MAX", () => {
+    expect(PER_PAGE_MAX).toBe(100);
+    expect(resolveLimit(["--limit", "500"], 30)).toBe(100);
+  });
+
+  it("throws VALIDATION_ERROR for a non-positive --limit", () => {
+    expect(() => resolveLimit(["--limit", "0"], 30)).toThrow(AxiError);
+    expect(() => resolveLimit(["--limit", "-1"], 30)).toThrow(AxiError);
+  });
+
+  it("throws VALIDATION_ERROR for a non-integer --limit", () => {
+    expect(() => resolveLimit(["--limit", "abc"], 30)).toThrow(AxiError);
   });
 });

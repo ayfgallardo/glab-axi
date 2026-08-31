@@ -1,8 +1,12 @@
 import { encode } from "@toon-format/toon";
 import type { RepoContext } from "../context.js";
 import { glabApiJson, glabExec } from "../glab.js";
-import { AxiError } from "../errors.js";
-import { takeFlag, takeNumber, rejectUnknownFlags } from "../args.js";
+import {
+  takeFlag,
+  takeNumber,
+  rejectUnknownFlags,
+  resolveLimit,
+} from "../args.js";
 import {
   field,
   pluck,
@@ -36,25 +40,8 @@ interface PipelineSchedule {
   last_pipeline?: { id: number; status?: string } | null;
 }
 
-/** GitLab caps pagination at 100 items per request. */
-const PER_PAGE_MAX = 100;
-
 function schedulePath(id: number, suffix = ""): string {
   return `projects/:id/pipeline_schedules/${id}${suffix}`;
-}
-
-/** Clamp a --limit to what GitLab will actually return in one page. */
-function resolveLimit(args: string[], fallback: number): number {
-  const raw = takeFlag(args, "--limit");
-  if (raw === undefined) return fallback;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new AxiError(
-      "--limit must be a positive integer",
-      "VALIDATION_ERROR",
-    );
-  }
-  return Math.min(parsed, PER_PAGE_MAX);
 }
 
 const listSchema: FieldDef[] = [

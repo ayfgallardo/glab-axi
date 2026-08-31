@@ -12,6 +12,8 @@ import {
   takeAllFlags,
   pushRepeated,
   rejectUnknownFlags,
+  resolveLimit,
+  PER_PAGE_MAX,
 } from "../args.js";
 import { parseFields, type ExtraFieldSpec } from "../fields.js";
 import {
@@ -54,28 +56,11 @@ interface Job {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** GitLab caps pagination at 100 items per request. */
-const PER_PAGE_MAX = 100;
-
 const LOG_TRUNCATE_LIMIT = 20000;
 
 /** The trailing `-R` that keeps a suggested command runnable outside this repo. */
 function repoArg(ctx?: RepoContext): string {
   return ctx && ctx.source !== "git" ? ` -R ${ctx.fullPath}` : "";
-}
-
-/** Clamp a --limit to what GitLab will actually return in one page. */
-function resolveLimit(args: string[], fallback: number): number {
-  const raw = takeFlag(args, "--limit");
-  if (raw === undefined) return fallback;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new AxiError(
-      "--limit must be a positive integer",
-      "VALIDATION_ERROR",
-    );
-  }
-  return Math.min(parsed, PER_PAGE_MAX);
 }
 
 function pipelinePath(id: number, suffix = ""): string {

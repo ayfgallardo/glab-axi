@@ -134,6 +134,23 @@ export function takeNumber(args: string[], label: string): number {
   return Number(raw);
 }
 
+/** GitLab caps pagination at 100 items per request. */
+export const PER_PAGE_MAX = 100;
+
+/** Clamp a --limit to what GitLab will actually return in one page. */
+export function resolveLimit(args: string[], fallback: number): number {
+  const raw = takeFlag(args, "--limit");
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new AxiError(
+      "--limit must be a positive integer",
+      "VALIDATION_ERROR",
+    );
+  }
+  return Math.min(parsed, PER_PAGE_MAX);
+}
+
 /**
  * Reject flags in `args` that are not listed in `known`, after the subcommand
  * has parsed the flags it recognizes. Positionals and `--help`/`-h` always
