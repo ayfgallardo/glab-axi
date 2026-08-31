@@ -16,6 +16,10 @@ vi.mock("../src/context.js", () => ({
   }),
 }));
 
+vi.mock("../src/glab.js", () => ({
+  glabApiJson: vi.fn().mockResolvedValue([]),
+}));
+
 import {
   COMMAND_NAMES,
   main,
@@ -31,6 +35,7 @@ import { LABEL_HELP } from "../src/commands/label.js";
 import { RELEASE_HELP } from "../src/commands/release.js";
 import { VARIABLE_HELP } from "../src/commands/variable.js";
 import { resolveRepo } from "../src/context.js";
+import { glabApiJson } from "../src/glab.js";
 import { AxiError, StackError } from "../src/errors.js";
 import { encode } from "@toon-format/toon";
 
@@ -180,7 +185,9 @@ describe("main CLI", () => {
         "not ported yet",
       );
     }
-    await expect(options.home([], ctx)).rejects.toThrow("not ported yet");
+    vi.mocked(glabApiJson).mockResolvedValue([]);
+    const homeResult = await options.home([], ctx);
+    expect(homeResult).toContain("assigned_mrs: 0 open");
   });
 
   it("routes issue to the ported command and exposes its help", async () => {

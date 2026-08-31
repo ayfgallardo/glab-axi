@@ -13,6 +13,7 @@ import { repoCommand, REPO_HELP } from "./commands/repo.js";
 import { labelCommand, LABEL_HELP } from "./commands/label.js";
 import { releaseCommand, RELEASE_HELP } from "./commands/release.js";
 import { variableCommand, VARIABLE_HELP } from "./commands/variable.js";
+import { homeCommand } from "./commands/home.js";
 
 export const DESCRIPTION =
   "Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.";
@@ -98,7 +99,7 @@ export async function main(options: MainOptions = {}): Promise<void> {
     version: VERSION,
     topLevelHelp: TOP_HELP,
     ...(options.stdout ? { stdout: options.stdout } : {}),
-    home: withRepoContext(notPorted),
+    home: withRepoContext(homeCommand),
     commands: COMMANDS,
     getCommandHelp: (command) => COMMAND_HELP[command],
     formatError: (error) => {

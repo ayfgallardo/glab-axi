@@ -7,7 +7,6 @@ import { configDefaults, defineConfig } from "vitest/config";
 const NOT_PORTED_YET = [
   "test/commands/api.test.ts",
   "test/commands/gist.test.ts",
-  "test/commands/home.test.ts",
   "test/commands/project.test.ts",
   "test/commands/search.test.ts",
   "test/commands/stack.test.ts",
