@@ -370,6 +370,20 @@ describe("issueCommand", () => {
       expect(result).toContain("issue view 42");
     });
 
+    it("extracts the iid from a work_items URL (issues migrated to work items)", async () => {
+      mockedExec.mockResolvedValue(
+        "https://gitlab.test/group/sub/project/-/work_items/1\n",
+      );
+
+      const result = await issueCommand(
+        ["create", "--title", "Fix login"],
+        ctx,
+      );
+
+      expect(result).toContain("iid: 1");
+      expect(result).toContain("issue view 1");
+    });
+
     it("sends an empty description when no body is given", async () => {
       mockedExec.mockResolvedValue(
         "https://gitlab.test/group/sub/project/-/issues/7\n",

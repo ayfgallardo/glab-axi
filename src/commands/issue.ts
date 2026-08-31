@@ -375,8 +375,10 @@ async function issueCreate(args: string[], ctx?: RepoContext): Promise<string> {
   if (milestone) glabArgs.push("--milestone", milestone);
 
   const stdout = await glabExec(glabArgs, ctx);
-  // Parse the iid from the emitted URL: https://<host>/<path>/-/issues/42
-  const urlMatch = stdout.match(/\/-\/issues\/(\d+)/);
+  // Parse the iid from the emitted URL: https://<host>/<path>/-/issues/42 on
+  // instances still on the classic issue view, or .../-/work_items/42 on
+  // instances that migrated issues to work items (GitLab 16.x+).
+  const urlMatch = stdout.match(/\/-\/(?:issues|work_items)\/(\d+)/);
   const iid = urlMatch ? Number(urlMatch[1]) : undefined;
   const url = stdout.trim().split("\n").pop()?.trim() ?? "";
 
