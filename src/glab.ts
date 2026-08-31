@@ -55,7 +55,20 @@ function toExecResult(
 
 function run(args: string[], ctx?: RepoContext): Promise<ExecResult> {
   return new Promise((resolve) => {
-    execFile("glab", args, execOptions(ctx), toExecResult(resolve));
+    const child = execFile(
+      "glab",
+      args,
+      execOptions(ctx),
+      toExecResult(resolve),
+    );
+    // Close the child's stdin immediately: this call path never has input to
+    // send, and execFile otherwise leaves stdin open. If glab ever prompts
+    // interactively (e.g. `glab stack sync` asking fork vs. upstream), an
+    // open, never-written, never-closed stdin makes it hang forever waiting
+    // for EOF instead of failing — an immediate close turns any such prompt
+    // into glab's own immediate non-interactive error, with its exit code
+    // surfaced normally through toExecResult/mapGlabError.
+    child.stdin?.end();
   });
 }
 

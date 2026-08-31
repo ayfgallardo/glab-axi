@@ -257,6 +257,12 @@ describe("glabRaw", () => {
     await glabRaw(["ci", "list"], ctx);
     expect(callArgs()).toEqual(["ci", "list", "-R", "group/project"]);
   });
+
+  it("closes the child's stdin immediately, converting any interactive prompt into an EOF-driven error instead of a hang", async () => {
+    const stdinEnd = mockExecFileResultWithStdin(null, "output", "");
+    await glabRaw(["stack", "sync"]);
+    expect(stdinEnd).toHaveBeenCalledWith();
+  });
 });
 
 describe("glabExecWithStdin", () => {
