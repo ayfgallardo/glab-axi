@@ -1,5 +1,5 @@
-/** Default GitHub host used when none is configured. */
-export const DEFAULT_HOST = "github.com";
+/** Default GitLab host used when none is configured. */
+export const DEFAULT_HOST = "gitlab.com";
 
 export interface HostContext {
   value: string;
@@ -7,15 +7,16 @@ export interface HostContext {
 }
 
 /**
- * Resolve the effective GitHub host.
- * Priority: explicit --hostname flag > GH_HOST env > github.com.
+ * Resolve the effective GitLab host.
+ * Priority: explicit --hostname flag > GITLAB_HOST env > gitlab.com.
  *
- * The resolved host feeds two places: the child `gh` process (via the GH_HOST
- * env var, which the child inherits) and the URLs gh-axi parses or builds.
+ * The resolved host feeds two places: the child `glab` process (via the
+ * GITLAB_HOST env var, which the child inherits) and the URLs glab-axi parses
+ * or builds.
  */
 export function resolveHost(flagValue?: string): string {
   if (flagValue) return flagValue;
-  const envHost = process.env["GH_HOST"];
+  const envHost = process.env["GITLAB_HOST"];
   if (envHost) return envHost;
   return DEFAULT_HOST;
 }

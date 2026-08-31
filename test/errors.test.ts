@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   AxiError,
-  mapGhError,
-  ghNotInstalledError,
+  mapGlabError,
+  glabNotInstalledError,
   exitCodeForError,
 } from "../src/errors.js";
+
+/** glab renders command errors inside a padded box on stderr. */
+function boxed(message: string): string {
+  return `          \n   ERROR  \n          \n  ${message}${" ".repeat(20)}\n\n`;
+}
 
 describe("AxiError", () => {
   it("has correct code and message", () => {
@@ -26,241 +31,139 @@ describe("AxiError", () => {
   });
 });
 
-describe("mapGhError", () => {
-  it("matches repo not found pattern", () => {
-    const err = mapGhError(
-      "Could not resolve to a Repository with the name 'cli/cli'",
-      1,
-    );
+describe("mapGlabError", () => {
+  it("matches the project-not-found form of a 404", () => {
+    const err = mapGlabError("glab: 404 Project Not Found (HTTP 404)", 1);
     expect(err.code).toBe("REPO_NOT_FOUND");
-    expect(err.message).toContain("cli/cli");
     expect(err.suggestions.length).toBeGreaterThan(0);
   });
 
-  it("matches issue not found pattern (GraphQL)", () => {
-    const err = mapGhError(
-      "Could not resolve to an Issue with the number of 999",
+  it("matches the group-not-found form of a 404", () => {
+    const err = mapGlabError("glab: 404 Group Not Found (HTTP 404)", 1);
+    expect(err.code).toBe("REPO_NOT_FOUND");
+  });
+
+  it("matches a bare 404 as NOT_FOUND", () => {
+    const err = mapGlabError(boxed("404 Not Found."), 1);
+    expect(err.code).toBe("NOT_FOUND");
+    expect(err.message).toBe("404 Not Found.");
+  });
+
+  it("matches 401 as AUTH_REQUIRED", () => {
+    const err = mapGlabError("glab: 401 Unauthorized (HTTP 401)", 1);
+    expect(err.code).toBe("AUTH_REQUIRED");
+    expect(err.suggestions.some((s) => s.includes("glab auth login"))).toBe(
+      true,
+    );
+  });
+
+  it("matches a 401 embedded in an API URL error", () => {
+    const err = mapGlabError(
+      boxed(
+        "Get https://gitlab.com/api/v4/projects/g%2Fp/variables: 401 {message: 401 Unauthorized}.",
+      ),
       1,
     );
-    expect(err.code).toBe("NOT_FOUND");
-    expect(err.message).toContain("999");
-  });
-
-  it("matches issue not found pattern (REST)", () => {
-    const err = mapGhError("issue 42 not found", 1);
-    expect(err.code).toBe("NOT_FOUND");
-    expect(err.message).toContain("42");
-  });
-
-  it("matches pull request not found pattern", () => {
-    const err = mapGhError("pull request 10 not found", 1);
-    expect(err.code).toBe("NOT_FOUND");
-    expect(err.message).toContain("10");
-  });
-
-  it("matches release not found pattern", () => {
-    const err = mapGhError('release with tag "v1.0" not found', 1);
-    expect(err.code).toBe("NOT_FOUND");
-    expect(err.message).toContain("v1.0");
-    expect(err.suggestions.some((s) => s.includes("release list"))).toBe(true);
-  });
-
-  it("matches run not found pattern", () => {
-    const err = mapGhError("run 12345 not found", 1);
-    expect(err.code).toBe("NOT_FOUND");
-    expect(err.message).toContain("12345");
-    expect(err.suggestions.some((s) => s.includes("run list"))).toBe(true);
-  });
-
-  it("matches auth required pattern", () => {
-    const err = mapGhError("To get started, please run: gh auth login", 1);
     expect(err.code).toBe("AUTH_REQUIRED");
   });
 
-  it("classifies gh's repo-resolution failure as a validation error, not auth", () => {
-    const err = mapGhError(
-      "none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`",
-      1,
-    );
-    expect(err.code).toBe("VALIDATION_ERROR");
-    expect(err.suggestions.join(" ")).toContain("-R <owner>/<name>");
-  });
-
-  it("matches missing OAuth scope pattern (e.g. gh project without project scope)", () => {
-    const err = mapGhError(
-      "error: your authentication token is missing required scopes [read:project]\n" +
-        "To request it, run:  gh auth refresh -s read:project",
-      1,
-    );
-    expect(err.code).toBe("FORBIDDEN");
-    expect(err.message).toBe(
-      "GitHub token is missing required scope(s): read:project",
-    );
-    expect(
-      err.suggestions.some((s) =>
-        s.includes("gh auth refresh -s read:project"),
+  it("matches glab's no-token message as AUTH_REQUIRED", () => {
+    const err = mapGlabError(
+      boxed(
+        "X could not authenticate to one or more of the configured GitLab instances..",
       ),
-    ).toBe(true);
+      1,
+    );
+    expect(err.code).toBe("AUTH_REQUIRED");
   });
 
-  it("matches forbidden pattern", () => {
-    const err = mapGhError("HTTP 403: Forbidden", 1);
+  it("matches 403 as FORBIDDEN", () => {
+    const err = mapGlabError("glab: 403 Forbidden (HTTP 403)", 1);
     expect(err.code).toBe("FORBIDDEN");
   });
 
-  it("matches GraphQL primary rate limit pattern", () => {
-    const err = mapGhError(
-      "GraphQL: API rate limit already exceeded for user ID 189865151.",
-      1,
-    );
+  it("matches 429 as RATE_LIMITED", () => {
+    const err = mapGlabError("glab: 429 Too Many Requests (HTTP 429)", 1);
     expect(err.code).toBe("RATE_LIMITED");
-    expect(err.message).toContain("rate limit");
     expect(err.suggestions.length).toBeGreaterThan(0);
   });
 
-  it("matches REST primary rate limit pattern (HTTP 403 form)", () => {
-    const err = mapGhError(
-      "HTTP 403: API rate limit exceeded for user ID 12345.",
+  it("matches a 400 as VALIDATION_ERROR and extracts the API message", () => {
+    const err = mapGlabError(
+      'glab: 400 Bad Request (HTTP 400) {"message":"title is missing"}',
       1,
     );
-    expect(err.code).toBe("RATE_LIMITED");
-  });
-
-  it("matches secondary rate limit pattern", () => {
-    const err = mapGhError(
-      "HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
-      1,
-    );
-    expect(err.code).toBe("RATE_LIMITED");
-    expect(err.message).toContain("secondary");
-  });
-
-  it("matches validation error pattern with message extraction", () => {
-    const stderr = 'HTTP 422: {"message": "Validation Failed", "errors": []}';
-    const err = mapGhError(stderr, 1);
     expect(err.code).toBe("VALIDATION_ERROR");
-    expect(err.message).toBe("Validation Failed");
+    expect(err.message).toBe("title is missing");
   });
 
-  it("matches validation error pattern without extractable message", () => {
-    const err = mapGhError("HTTP 422", 1);
+  it("matches a 422 as VALIDATION_ERROR", () => {
+    const err = mapGlabError("glab: 422 Unprocessable (HTTP 422)", 1);
     expect(err.code).toBe("VALIDATION_ERROR");
-    expect(err.message).toBe("Validation error");
   });
 
   it("returns NOT_FOUND for generic not found messages", () => {
-    const err = mapGhError("something not found", 1);
+    const err = mapGlabError("something not found", 1);
     expect(err.code).toBe("NOT_FOUND");
-  });
-
-  it('returns NOT_FOUND for "Not Found" (capitalized)', () => {
-    const err = mapGhError("Not Found", 1);
-    expect(err.code).toBe("NOT_FOUND");
-  });
-
-  it("returns NOT_FOUND for mixed-case not found messages", () => {
-    const err = mapGhError("resource NOT found", 1);
-    expect(err.code).toBe("NOT_FOUND");
-  });
-
-  it("maps sub-issue already-linked errors to an actionable message", () => {
-    const err = mapGhError(
-      "GraphQL: Sub-issue is already a sub-issue of issue with number 5 (addSubIssue)",
-      1,
-    );
-    expect(err.code).toBe("VALIDATION_ERROR");
-    expect(err.message).toMatch(/already a sub-issue of #?5/);
-  });
-
-  it("maps sub-issue cycle errors", () => {
-    const err = mapGhError(
-      "GraphQL: Sub-issue would create a cycle (addSubIssue)",
-      1,
-    );
-    expect(err.code).toBe("VALIDATION_ERROR");
-    expect(err.message).toMatch(/cycle/i);
-  });
-
-  it("maps sub-issue self-parent errors", () => {
-    const err = mapGhError(
-      "GraphQL: An issue cannot be a sub-issue of itself (addSubIssue)",
-      1,
-    );
-    expect(err.code).toBe("VALIDATION_ERROR");
-    expect(err.message).toMatch(/itself/i);
   });
 
   it("returns UNKNOWN for unrecognized errors", () => {
-    const err = mapGhError("some random error", 1);
+    const err = mapGlabError("some random error", 1);
     expect(err.code).toBe("UNKNOWN");
     expect(err.message).toBe("some random error");
   });
 
   it("returns UNKNOWN with exit code message for empty stderr", () => {
-    const err = mapGhError("", 2);
+    const err = mapGlabError("", 2);
     expect(err.code).toBe("UNKNOWN");
     expect(err.message).toContain("exited with code 2");
   });
 
+  it("skips glab's ERROR banner when reporting an unrecognized error", () => {
+    const err = mapGlabError(boxed("some random error"), 1);
+    expect(err.code).toBe("UNKNOWN");
+    expect(err.message).toBe("some random error");
+  });
+
+  it("strips the `glab: ` prefix from API error lines", () => {
+    const err = mapGlabError("glab: something odd happened", 1);
+    expect(err.message).toBe("something odd happened");
+  });
+
   it("uses first line of multi-line stderr for UNKNOWN errors", () => {
-    const err = mapGhError("first line\nsecond line\nthird line", 1);
+    const err = mapGlabError("first line\nsecond line\nthird line", 1);
     expect(err.code).toBe("UNKNOWN");
     expect(err.message).toBe("first line");
   });
 });
 
-describe("ghNotInstalledError", () => {
-  it("returns AxiError with GH_NOT_INSTALLED code", () => {
-    const err = ghNotInstalledError();
+describe("glabNotInstalledError", () => {
+  it("returns AxiError with GLAB_NOT_INSTALLED code", () => {
+    const err = glabNotInstalledError();
     expect(err).toBeInstanceOf(AxiError);
-    expect(err.code).toBe("GH_NOT_INSTALLED");
-    expect(err.message).toContain("gh CLI");
+    expect(err.code).toBe("GLAB_NOT_INSTALLED");
+    expect(err.message).toContain("glab CLI");
   });
 });
 
 describe("exitCodeForError", () => {
   it("returns 2 for VALIDATION_ERROR", () => {
-    const err = new AxiError("missing flag", "VALIDATION_ERROR");
-    expect(exitCodeForError(err)).toBe(2);
+    expect(exitCodeForError(new AxiError("bad", "VALIDATION_ERROR"))).toBe(2);
   });
 
-  it("returns 1 for NOT_FOUND", () => {
-    const err = new AxiError("not found", "NOT_FOUND");
-    expect(exitCodeForError(err)).toBe(1);
-  });
-
-  it("returns 1 for REPO_NOT_FOUND", () => {
-    const err = new AxiError("repo not found", "REPO_NOT_FOUND");
-    expect(exitCodeForError(err)).toBe(1);
-  });
-
-  it("returns 1 for AUTH_REQUIRED", () => {
-    const err = new AxiError("auth required", "AUTH_REQUIRED");
-    expect(exitCodeForError(err)).toBe(1);
-  });
-
-  it("returns 1 for FORBIDDEN", () => {
-    const err = new AxiError("forbidden", "FORBIDDEN");
-    expect(exitCodeForError(err)).toBe(1);
-  });
-
-  it("returns 1 for RATE_LIMITED", () => {
-    const err = new AxiError("rate limited", "RATE_LIMITED");
-    expect(exitCodeForError(err)).toBe(1);
-  });
-
-  it("returns 1 for GH_NOT_INSTALLED", () => {
-    const err = new AxiError("gh missing", "GH_NOT_INSTALLED");
-    expect(exitCodeForError(err)).toBe(1);
-  });
-
-  it("returns 1 for UNKNOWN", () => {
-    const err = new AxiError("unknown", "UNKNOWN");
-    expect(exitCodeForError(err)).toBe(1);
+  it.each([
+    "NOT_FOUND",
+    "REPO_NOT_FOUND",
+    "AUTH_REQUIRED",
+    "FORBIDDEN",
+    "RATE_LIMITED",
+    "GLAB_NOT_INSTALLED",
+    "UNKNOWN",
+  ])("returns 1 for %s", (code) => {
+    expect(exitCodeForError(new AxiError("msg", code))).toBe(1);
   });
 
   it("returns 1 for non-AxiError", () => {
-    const err = new Error("generic error");
-    expect(exitCodeForError(err)).toBe(1);
+    expect(exitCodeForError(new Error("generic error"))).toBe(1);
   });
 });

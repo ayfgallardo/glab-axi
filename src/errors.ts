@@ -7,7 +7,7 @@ export type ErrorCode =
   | "FORBIDDEN"
   | "VALIDATION_ERROR"
   | "RATE_LIMITED"
-  | "GH_NOT_INSTALLED"
+  | "GLAB_NOT_INSTALLED"
   | "UNKNOWN";
 
 export { AxiError, exitCodeForError };
@@ -32,129 +32,96 @@ interface ErrorPattern {
 
 const patterns: ErrorPattern[] = [
   {
-    pattern: /Could not resolve to a Repository with the name '([^']+)'/,
+    // glab returns this for an unknown project OR one the token cannot see, and
+    // it must sit ahead of the bare 404 pattern below.
+    pattern: /404 (?:Project|Group) Not Found/i,
     code: "REPO_NOT_FOUND",
-    message: (m) => `Repository "${m[1]}" not found`,
-    suggestions: () => ["Run `gh-axi repo list` to see your repositories"],
-  },
-  {
-    pattern: /Could not resolve to an? .+? with the number of (\d+)/,
-    code: "NOT_FOUND",
-    message: (m) => `Item #${m[1]} does not exist in this repository`,
-    suggestions: () => [],
-  },
-  {
-    pattern: /issue (\d+) not found/i,
-    code: "NOT_FOUND",
-    message: (m) => `Issue #${m[1]} does not exist`,
-    suggestions: () => [],
-  },
-  {
-    pattern: /pull request (\d+) not found/i,
-    code: "NOT_FOUND",
-    message: (m) => `Pull request #${m[1]} does not exist`,
-    suggestions: () => [],
-  },
-  {
-    pattern: /release with tag "([^"]+)" not found/i,
-    code: "NOT_FOUND",
-    message: (m) => `Release "${m[1]}" not found`,
+    message: (m) =>
+      `${m[0].replace(/404 /, "")} — check the path or your access`,
     suggestions: () => [
-      `Run \`gh-axi release list\` to see available releases`,
+      "Pass the project explicitly: `-R <namespace>/<project>` (after the command)",
+      "Run `glab-axi repo list` to see the projects you can reach",
     ],
   },
   {
-    pattern: /run (\d+) not found/i,
+    pattern: /\b404\b/,
     code: "NOT_FOUND",
-    message: (m) => `Run ${m[1]} not found`,
-    suggestions: () => [`Run \`gh-axi run list\` to see recent runs`],
+    message: (_m, stderr) => firstErrorLine(stderr),
   },
   {
-    // gh tacks a `gh auth login` hint onto its repo-resolution failure, but the
-    // token is fine: gh just could not work out which repository to target from
-    // the git remotes (unknown host, SSH host alias, no GitHub remote). Must sit
-    // ahead of the generic `gh auth login` pattern below, which would otherwise
-    // report a bogus AUTH_REQUIRED.
-    pattern:
-      /none of the git remotes configured for this repository point to a known GitHub host/i,
-    code: "VALIDATION_ERROR",
-    message: () =>
-      "Could not determine the target repository from this checkout's git remotes",
-    suggestions: () => [
-      "Pass the repo explicitly: `-R <owner>/<name>` (after the command)",
-      "For a GitHub Enterprise host, add `--hostname <host>` or set GH_HOST",
-    ],
-  },
-  {
-    pattern: /gh auth login/,
+    pattern: /could not authenticate to one or more of the configured GitLab/i,
     code: "AUTH_REQUIRED",
-    message: () => "GitHub auth required — run `gh auth login` first",
-  },
-  {
-    pattern: /authentication token is missing required scopes \[([^\]]+)\]/i,
-    code: "FORBIDDEN",
-    message: (m) => `GitHub token is missing required scope(s): ${m[1]}`,
-    suggestions: (m) => [
-      `Run \`gh auth refresh -s ${m[1]}\` to grant the required scope`,
-      "Then verify with `gh auth status`",
-    ],
-  },
-  {
-    pattern: /secondary rate limit/i,
-    code: "RATE_LIMITED",
-    message: () => "GitHub secondary rate limit hit — wait ~60s and retry",
+    message: () => "GitLab auth required — no usable token for this host",
     suggestions: () => [
-      "Wait 60s before retrying",
-      "Use `gh api` (REST) for read-only ops, which has a separate budget",
+      "Run `glab auth login` (or set GITLAB_TOKEN)",
+      "Then verify with `glab auth status`",
     ],
   },
   {
-    pattern: /API rate limit (?:already )?exceeded/i,
-    code: "RATE_LIMITED",
-    message: () => "GitHub API rate limit exceeded",
+    pattern: /\b401\b|\bUnauthorized\b/i,
+    code: "AUTH_REQUIRED",
+    message: () => "GitLab auth required — run `glab auth login` first",
     suggestions: () => [
-      "Wait until the hourly window resets (run `gh api rate_limit` to check)",
-      "Use a different identity with `gh auth switch` if available",
+      "Run `glab auth login` (or set GITLAB_TOKEN)",
+      "Then verify with `glab auth status`",
     ],
   },
   {
-    pattern: /sub-issue is already a sub-issue of issue with number (\d+)/i,
-    code: "VALIDATION_ERROR",
-    message: (m) => `Issue is already a sub-issue of #${m[1]}`,
+    pattern: /\b429\b|Too Many Requests|Retry later/i,
+    code: "RATE_LIMITED",
+    message: () => "GitLab rate limit hit — wait and retry",
+    suggestions: () => [
+      "Wait ~60s before retrying",
+      "Reduce concurrent requests, or use a token with a higher limit",
+    ],
   },
   {
-    pattern: /sub-?issue.*?(cycle|circular)/i,
-    code: "VALIDATION_ERROR",
-    message: () => "Cannot add sub-issue: would create a cycle",
-  },
-  {
-    pattern: /issue cannot be a sub-?issue of itself/i,
-    code: "VALIDATION_ERROR",
-    message: () => "An issue cannot be a sub-issue of itself",
-  },
-  {
-    pattern: /HTTP 403/,
+    pattern: /\b403\b|\bForbidden\b/i,
     code: "FORBIDDEN",
     message: () => "Insufficient permissions for this action",
+    suggestions: () => [
+      "Check your role on the project (Developer or above for most writes)",
+      "For a token, check its scopes with `glab auth status`",
+    ],
   },
   {
-    pattern: /HTTP 422/,
+    pattern: /\b(?:400|422)\b/,
     code: "VALIDATION_ERROR",
-    message: (_m, stderr) => {
-      // Try to extract a meaningful message from the 422 body
-      const msgMatch = stderr.match(/"message"\s*:\s*"([^"]+)"/);
-      return msgMatch ? msgMatch[1] : "Validation error";
-    },
+    message: (_m, stderr) => apiMessage(stderr) ?? "Validation error",
   },
 ];
 
-function firstErrorLine(stderr: string): string {
-  return stderr.trim().split("\n")[0] ?? "";
+/**
+ * glab renders command errors inside a padded box whose first lines are blank
+ * and an `ERROR` banner, and prefixes `glab: ` on API failures. Strip all of
+ * that so patterns and reported messages see the actual error text.
+ */
+function cleanLines(stderr: string): string[] {
+  return stderr
+    .split("\n")
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^glab: /, "")
+        .replace(/^[Xx] /, ""),
+    )
+    .filter((line) => line.length > 0 && line !== "ERROR");
 }
 
-export function mapGhError(stderr: string, exitCode: number): AxiError {
+function firstErrorLine(stderr: string): string {
+  return cleanLines(stderr)[0] ?? "";
+}
+
+function apiMessage(stderr: string): string | undefined {
+  const match = stderr.match(/"message"\s*:\s*"([^"]+)"/);
+  return match ? match[1] : undefined;
+}
+
+export function mapGlabError(stderr: string, exitCode: number): AxiError {
+  const cleaned = cleanLines(stderr).join("\n");
+
   for (const { pattern, code, message, suggestions } of patterns) {
-    const match = stderr.match(pattern);
+    const match = cleaned.match(pattern);
     if (match) {
       return new AxiError(
         message(match, stderr),
@@ -164,20 +131,19 @@ export function mapGhError(stderr: string, exitCode: number): AxiError {
     }
   }
 
-  // Generic not-found for any 404-like message
-  if (/not found/i.test(stderr)) {
+  if (/not found/i.test(cleaned)) {
     return new AxiError(firstErrorLine(stderr), "NOT_FOUND");
   }
 
   return new AxiError(
-    firstErrorLine(stderr) || `gh exited with code ${exitCode}`,
+    firstErrorLine(stderr) || `glab exited with code ${exitCode}`,
     "UNKNOWN",
   );
 }
 
-export function ghNotInstalledError(): AxiError {
+export function glabNotInstalledError(): AxiError {
   return new AxiError(
-    "gh CLI is not installed — see https://cli.github.com",
-    "GH_NOT_INSTALLED",
+    "glab CLI is not installed — see https://gitlab.com/gitlab-org/cli",
+    "GLAB_NOT_INSTALLED",
   );
 }
