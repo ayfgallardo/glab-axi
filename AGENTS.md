@@ -123,9 +123,14 @@ Never expose an interactive path. Force `view --json`, `submit --auto`, and `mer
 
 ## Merge requests (`src/commands/mr.ts`)
 
-Reads go through `glabApiJson` against the REST API and are shaped locally before TOON; mutations go through the `glab mr` subcommand that owns the flow (`create`, `close`, `reopen`, `merge`, `update`, `rebase`, `checkout`, `approve`, `revoke`, `diff --raw`). Comments are the exception: they are posted with `POST …/merge_requests/:iid/notes`, because `glab mr note create` is still marked EXPERIMENTAL.
+Reads go through `glabApiJson` against the REST API and are shaped locally before TOON; mutations go through the `glab mr` subcommand that owns the flow (`create`, `close`, `reopen`, `merge`, `update`, `rebase`, `checkout`, `approve`, `revoke`). Two deliberate crossings of that line:
+
+- **Comments are a mutation done through the API** (`POST …/merge_requests/:iid/notes`), because `glab mr note create` is still marked EXPERIMENTAL and the parent `glab mr note` exposes no `-m`.
+- **`mr diff` is a read done through the subcommand** (`glab mr diff --raw`), because the unified diff is already the final form an agent wants: `GET …/merge_requests/:iid/diffs` returns per-file JSON that would have to be reassembled into that same text, and there is no TOON shaping to gain along the way. Keep it on the subcommand.
 
 Every glab mutation is forced non-interactive. `create` always passes `--description` (empty when no body) and `--yes`, since `--yes` only skips the final submission prompt and an absent description opens an editor; `update` and `merge` also pass `--yes`.
+
+`mr merge` always spells out `--auto-merge=true|false`. glab defaults `--auto-merge` to **true** whenever a pipeline is running, so a bare `if (auto) push("--auto-merge")` is a no-op and leaves no way to ask for an immediate merge. `--auto` states the default explicitly, `--now` maps to `--auto-merge=false`, and the two are mutually exclusive.
 
 Deliberate divergences from gh-axi's `pr`, all GitLab vocabulary rather than GitHub's:
 
