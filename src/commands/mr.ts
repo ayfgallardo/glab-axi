@@ -286,6 +286,7 @@ const MR_FLAGS: Record<string, readonly string[]> = {
     "--squash",
     "--rebase",
     "--auto",
+    "--now",
     "--remove-source-branch",
     "--body",
     "--body-file",
@@ -312,7 +313,7 @@ flags{create}:
 flags{edit}:
   --title <text>, --body <text> or --body-file <path>, --add-label <name> (repeatable), --remove-label <name> (repeatable), --add-assignee <username> (repeatable), --remove-assignee <username> (repeatable), --add-reviewer <username> (repeatable), --remove-reviewer <username> (repeatable), --milestone, --target-branch
 flags{merge}:
-  --method <merge|squash|rebase>, --merge, --squash, --rebase, --auto (merge when the pipeline succeeds), --remove-source-branch, --body <text> or --body-file <path> (merge commit message)
+  --method <merge|squash|rebase>, --merge, --squash, --rebase, --auto (wait for the running pipeline — already the default), --now (merge immediately instead of waiting), --remove-source-branch, --body <text> or --body-file <path> (merge commit message)
 flags{review}:
   --approve, --revoke (remove your approval), --comment, --body <text> or --body-file <path>
 flags{comment}:
@@ -674,6 +675,13 @@ async function mrMerge(args: string[], ctx?: RepoContext): Promise<string> {
     );
   }
   const auto = takeBoolFlag(args, "--auto");
+  const now = takeBoolFlag(args, "--now");
+  if (auto && now) {
+    throw new AxiError(
+      "Choose either --auto or --now, not both",
+      "VALIDATION_ERROR",
+    );
+  }
   const removeSourceBranch = takeBoolFlag(args, "--remove-source-branch");
   const body = takeBody(args);
 
@@ -700,18 +708,26 @@ async function mrMerge(args: string[], ctx?: RepoContext): Promise<string> {
   // A merge commit is glab's default, so only squash and rebase need a flag.
   if (method === "squash") glabArgs.push("--squash");
   if (method === "rebase") glabArgs.push("--rebase");
-  if (auto) glabArgs.push("--auto-merge");
+  // glab defaults --auto-merge to true whenever a pipeline is running, so the
+  // value is always spelled out: otherwise `--auto` is a no-op and there is no
+  // way to ask for an immediate merge at all.
+  glabArgs.push(`--auto-merge=${now ? "false" : "true"}`);
   if (removeSourceBranch) glabArgs.push("--remove-source-branch");
   if (body !== undefined) glabArgs.push("--message", body);
 
   await glabExec(glabArgs, ctx);
 
   return renderOutput([
-    renderDetail("merged", { iid, status: "ok", method: method ?? "merge" }, [
-      field("iid"),
-      field("status"),
-      field("method"),
-    ]),
+    renderDetail(
+      "merged",
+      {
+        iid,
+        status: "ok",
+        method: method ?? "merge",
+        auto_merge: now ? "no" : "yes",
+      },
+      [field("iid"), field("status"), field("method"), field("auto_merge")],
+    ),
     renderHelp(
       getSuggestions({ domain: "mr", action: "merge", id: iid, repo: ctx }),
     ),

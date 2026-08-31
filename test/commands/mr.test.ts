@@ -516,8 +516,38 @@ describe("mrCommand", () => {
 
       const result = await mrCommand(["merge", "42", "--merge"], ctx);
 
-      expect(execArgsOf()).toEqual(["mr", "merge", "42", "--yes"]);
+      expect(execArgsOf()).toEqual([
+        "mr",
+        "merge",
+        "42",
+        "--yes",
+        "--auto-merge=true",
+      ]);
       expect(result).toContain("method: merge");
+      expect(result).toContain("auto_merge: yes");
+    });
+
+    it("spells out --auto-merge=false for --now", async () => {
+      mockedApi.mockResolvedValue(mrPayload());
+      mockedExec.mockResolvedValue("");
+
+      const result = await mrCommand(["merge", "42", "--now"], ctx);
+
+      expect(execArgsOf()).toEqual([
+        "mr",
+        "merge",
+        "42",
+        "--yes",
+        "--auto-merge=false",
+      ]);
+      expect(result).toContain("auto_merge: no");
+    });
+
+    it("rejects --auto together with --now", async () => {
+      await expect(
+        mrCommand(["merge", "42", "--auto", "--now"], ctx),
+      ).rejects.toThrow(/either --auto or --now/);
+      expect(mockedApi).not.toHaveBeenCalled();
     });
 
     it("maps squash, auto and source branch removal onto glab flags", async () => {
@@ -543,7 +573,7 @@ describe("mrCommand", () => {
         "42",
         "--yes",
         "--squash",
-        "--auto-merge",
+        "--auto-merge=true",
         "--remove-source-branch",
         "--message",
         "msg",
