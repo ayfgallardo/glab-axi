@@ -26,12 +26,16 @@ Command modules talk to glab through `src/glab.ts` only: `glabJson`, `glabExec`,
 
 `glabApiJson` never appends `-R` (glab 1.97 does accept `-R` on `glab api` and resolves it against `:id`, but `glab api` has no other way to pass a project, so relying on it would leave every other flag ordering untested). The project travels inside the path as the URL-encoded `:id` instead, substituted by `glabApiJson` itself from the context (`encodedProjectId` in `context.ts`). Its `fields` are split by JS type: strings go to `--raw-field`, booleans and numbers to `--field`, because glab's `--field` does magic type conversion that would turn a title of `"42"` into an integer.
 
+**`glab api --raw-field`/`--field` cannot express nested keys or arrays** — verified live: `files[0][file_path]=x` is sent to GitLab as the literal JSON property name `"files[0][file_path]"`, not a nested array, and GitLab rejects it (`files, content are missing`). Any endpoint that needs a nested body (e.g. snippet `files: [...]`) must go through `glabApiJsonBody(path, body, opts)` instead, which pipes `JSON.stringify(body)` on stdin via `--method <m> --input -`. `glabApiJson`'s `fields` option stays correct for flat bodies.
+
 GitLab speaks `iid` (per-project visible number) for issues and MRs. The global `id` must never surface in the UX.
 
-`mapGlabError` walks `patterns` in order and returns on the first hit, so **order is the contract**: a narrow pattern must sit ahead of any broader one that would swallow it. Two glab-specific traps, both verified against glab 1.97:
+`mapGlabError` walks `patterns` in order and returns on the first hit, so **order is the contract**: a narrow pattern must sit ahead of any broader one that would swallow it. Traps verified against glab 1.97:
 
-- glab does not print a bare error line. It renders a **box** on stderr — blank line, `ERROR` banner, blank line, then the space-padded message — and prefixes `glab: ` on API failures. `cleanLines()` strips all of that; patterns and reported messages run on the cleaned text, otherwise the reported message is literally `ERROR`.
-- HTTP statuses must be matched only where glab prints one — line start, its `(HTTP 404)` suffix, or after the `: ` that follows the request URL. Use the `httpStatus()` helper. A floating `\b404\b` also matches a resource id inside the URL, so any failure on issue/MR iid 400/401/403/404/429 gets misclassified.
+- glab does not print a bare error line. It renders a **box** on stderr — blank line, `ERROR` banner, blank line, then the space-padded message — and prefixes `glab: ` on API failures. `cleanLines()` strips all of that; patterns and reported messages run on the cleaned text, otherwise the reported message is literally `ERROR`. When flat context lines (e.g. a recovery-file notice) precede the box, the box still holds the real reason: `boxedMessage()` extracts the lines between the `ERROR` banner and its closing blank line (rejoining a message glab wrapped across several padded lines) and `firstErrorLine()` prefers it over the first raw line.
+- HTTP statuses must be matched only where glab prints one — line start, its `(HTTP 404)` suffix, after the `: ` that follows the request URL, or as a bare `HTTP <code>` word (the `glab: HTTP 400` form glab appends after a JSON error body with no request URL at all). Use the `httpStatus()` helper. A floating `\b404\b` also matches a resource id inside the URL, so any failure on issue/MR iid 400/401/403/404/429 gets misclassified.
+- A JSON error body's message can live under either `"message"` or `"error"` — `apiMessage()` checks both.
+- `glab mr create` (and other cwd-bound mutations) refuse to run when no local git remote matches the configured host, even when `-R`/`--hostname` targets a different project explicitly — this is glab's own guard, not a glab-axi context bug. It maps to `REPO_RESOLUTION` with a suggestion to run from a checkout of the target project.
 
 ## Dependency bumps and the lockfile
 
@@ -112,6 +116,8 @@ Reads go through `glabApiJson` against `projects/:id/issues[/:iid]` and are shap
 
 `glab issue update` has no `--yes`, unlike `mr update`; the guard from the old gh-axi port (skip the subcommand call entirely when no field besides the iid changed) is kept because calling it with nothing but the iid still errors.
 
+`create`'s iid extraction reads the created issue's URL, which is **not** stable across instances: GitLab has been migrating issues to work items (16.x+), so a recent/self-managed instance answers `.../-/work_items/<iid>` instead of the classic `.../-/issues/<iid>` — verified live on git.geofoncier.fr with glab 1.97. The regex accepts both forms (`/-\/(?:issues|work_items)\/(\d+)/`); `mr.ts`'s equivalent stays issues-only since MRs were verified to still answer `/-/merge_requests/<iid>`.
+
 `lock`/`unlock` map onto `glab issue update --lock-discussion`/`--unlock-discussion`, gated by the same idempotent-check-then-mutate pattern as `close`/`reopen` (read `discussion_locked` first, no-op with `already: true` when it already matches).
 
 Three gh-axi surfaces were dropped rather than ported, all genuinely GitHub-only with no GitLab REST equivalent — not a straight GraphQL→REST swap:
@@ -181,6 +187,8 @@ All three follow the `mr.ts` split: reads through `glabApiJson` against `project
 ## Home dashboard (`src/commands/home.ts`)
 
 The bare `glab-axi` invocation. Unlike every scoped command family it needs no `RepoContext` at all: `GET /user`, `GET /merge_requests?scope=assigned_to_me&state=opened`, `GET /issues?scope=assigned_to_me&state=opened` and `GET /todos` are all account-scoped, not project-scoped, so it never forwards `ctx` to `glabApiJson` — same reasoning as the "User-scoped commands" pattern above, though the earlier explanation (avoiding an injected `-R`) does not even apply here, since none of these paths contain `:id`. The four calls run in `Promise.all`, each independently `.catch()`-guarded to `undefined`/`[]` so one failing endpoint (e.g. missing scope) still renders the rest of the dashboard instead of failing it outright.
+
+`homeCommand` is also registered in `cli.ts`'s `COMMANDS` under the explicit `"home"` key (not just as the SDK's `options.home` bare-invocation handler) — the SDK (`axi-sdk-js`'s `runAxiCli`) only special-cases an _empty_ argv into `options.home`; a literal `glab-axi home` is looked up in `options.commands` like any other named command and answered `Unknown command` if absent. Routing it explicitly renders the same dashboard, just without the SDK's home-view header merge (`isHomeView` is only true for the bare form).
 
 ## Maintaining this file
 

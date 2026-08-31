@@ -310,6 +310,8 @@ flags{view}:
   --comments, --reviews (show approvals and diff review threads), --full (show complete description without truncation)
 flags{create}:
   --title <text> (required), --body <text> or --body-file <path>, --target-branch, --source-branch, --draft, --assignee <username> (repeatable), --reviewer <username> (repeatable), --label <name> (repeatable), --milestone, --remove-source-branch
+notes{create}:
+  must run from a checkout of the target project (a matching git remote is required, even with -R)
 flags{edit}:
   --title <text>, --body <text> or --body-file <path>, --add-label <name> (repeatable), --remove-label <name> (repeatable), --add-assignee <username> (repeatable), --remove-assignee <username> (repeatable), --add-reviewer <username> (repeatable), --remove-reviewer <username> (repeatable), --milestone, --target-branch
 flags{merge}:

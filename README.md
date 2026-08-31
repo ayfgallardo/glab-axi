@@ -16,6 +16,12 @@ Not published on npm — install straight from this repository:
 npm install -g git+https://github.com/ayfgallardo/glab-axi
 ```
 
+If your npm registry policy blocks git installs, clone and install from the local checkout instead:
+
+```sh
+git clone https://github.com/ayfgallardo/glab-axi && npm install -g ./glab-axi
+```
+
 ### Prerequisites
 
 - [`glab`](https://gitlab.com/gitlab-org/cli) installed and authenticated: `glab auth login`.
