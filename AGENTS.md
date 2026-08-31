@@ -8,7 +8,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 This repository is a port of gh-axi 0.1.35 (a `gh` wrapper) to `glab`. The core layer is ported; the command families are not yet.
 
-Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/mr.ts`, and the `mr` entries of `src/suggestions.ts`.
+Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/mr.ts`, `src/commands/ci.ts`, `src/commands/schedule.ts`, and the `mr`, `ci` and `schedule` entries of `src/suggestions.ts`.
 Not yet ported: the rest of `src/commands/` plus `src/totals.ts`, `src/gistSelector.ts` and the other domains of `src/suggestions.ts`. Every unported command family routes to an inline stub in `cli.ts` that throws `not ported yet`.
 
 The unported gh modules are held out of the graph so build and test stay green: `tsconfig.json` excludes them file by file (alongside `src/totals.ts`), and `vitest.config.ts` carries a commented `NOT_PORTED_YET` list naming the lot that reclaims each suite. **Each port lot removes its own entry from both lists** — `describe.skip` is not an option, because a suite whose import fails errors before the skip is evaluated.
@@ -17,7 +17,7 @@ Sections below tagged **[gh-era]** describe the unported modules and still say `
 
 ## glab invocation core (`src/glab.ts`, `src/context.ts`, `src/errors.ts`)
 
-Command modules talk to glab through `src/glab.ts` only: `glabJson`, `glabExec`, `glabRaw`, `glabExecWithStdin`, `glabApiJson`. All go through `execFile("glab", …)` — never a shell.
+Command modules talk to glab through `src/glab.ts` only: `glabJson`, `glabExec`, `glabRaw`, `glabExecWithStdin`, `glabApiJson`, `glabApiText` (same call as `glabApiJson` for the endpoints that answer plain text, such as a job trace). All go through `execFile("glab", …)` — never a shell.
 
 `RepoContext` is `{ fullPath, source, host? }`. GitLab namespaces nest, so there is no owner/name pair and no `nwo`: `group/subgroup/project` is one `fullPath`. `buildArgs` appends **`-R <fullPath>`** (not `--repo`) when `source !== "git"`, letting glab auto-detect the git remote otherwise.
 
@@ -143,6 +143,25 @@ Deliberate divergences from gh-axi's `pr`, all GitLab vocabulary rather than Git
 `mr edit` maps onto `glab mr update`, which _replaces_ assignees and reviewers unless each name is prefixed: `--add-*` becomes `+name` and `--remove-*` becomes `!name` (`!`, not `-`, so the value is never parsed as a flag).
 
 `mr checks` is pipeline jobs, not GitHub checks: the head pipeline comes from the MR payload's `head_pipeline`, then `GET /projects/:id/pipelines/:pipeline_id/jobs`. A failed job prepends a `glab-axi ci view <pipeline>` suggestion. `mr view --reviews` reads `…/approvals` (whose `approvals_required`/`approvals_left` are Premium-only and must render as `null` on Free) plus the `…/discussions` entries whose first note carries a `position`, which are the diff-anchored review threads.
+
+## CI pipelines (`src/commands/ci.ts`)
+
+`ci` is the port of gh-axi's `run`, against GitLab pipelines. Reads go through `glabApiJson`; the whole module addresses pipelines and jobs by their **`id`**, never the pipeline `iid` — the id is what the GitLab UI and every `web_url` show, and `mr checks` already hands out pipeline ids.
+
+Mapping, all verified against the REST docs and a live instance:
+
+- `list` -> `GET /projects/:id/pipelines`, `status` -> `GET /projects/:id/pipelines/latest` (`?ref=`), `view` -> the pipeline plus `GET /projects/:id/pipelines/:pipeline_id/jobs`.
+- `retry` and `cancel` are **mutations done through the API** (`POST …/pipelines/:id/retry|cancel`, `POST …/jobs/:id/retry`), unlike the `mr` rule of preferring the subcommand: `glab ci retry` only ever retries a *job* and prompts interactively without one, and `glab ci cancel pipeline` would then be the odd one out.
+- `run` does go through `glab ci run` (`--branch`, repeatable `--variables k:v`); the new pipeline id is parsed out of the emitted URL, as in `mr create`.
+- `log <job-id>` -> `GET /projects/:id/jobs/:job_id/trace`, which returns **plain text** — hence `glabApiText`. The trace is the runner's raw terminal output, so the ANSI escapes are stripped (gh already hands back a clean log) before the tail-first truncation at 20 000 chars and the best-effort full-log tempfile.
+- `watch` polls the pipeline itself (`--interval`, `--timeout`, both bounded): `glab ci status --live` and `glab ci view` are TUIs, and AXI commands must never go interactive. A timeout returns `timed_out: true` rather than an error.
+
+Two GitLab traps: `pipelines/latest` answers **403** when the ref has no pipeline at all, so a missing pipeline surfaces as FORBIDDEN; and `per_page` is capped at 100, so `--limit` is clamped rather than promising more than one page returns.
+
+## Pipeline schedules (`src/commands/schedule.ts`)
+
+`schedule` is the port of gh-axi's `workflow`. GitHub workflows and GitLab schedules are not the same object — a `.gitlab-ci.yml` is not addressable the way a workflow file is — so the port keeps the shape (`list|view|run|enable|disable`) over `/projects/:id/pipeline_schedules`.
+`run` is `glab schedule run <id>` (the API's `POST …/play`), and `enable`/`disable` are `glab schedule update <id> --active=true|false`: the value must be spelled with `=`, and both keep `workflow`'s idempotence check (read the schedule first, report `already_enabled`/`already_disabled` without calling glab).
 
 ## Raising PRs to upstream
 
