@@ -1,10 +1,9 @@
 import { encode } from "@toon-format/toon";
 import type { RepoContext } from "../context.js";
-import { ghJson, ghExec, ghRaw } from "../gh.js";
+import { glabApiJson, glabExec } from "../glab.js";
 import { AxiError } from "../errors.js";
 import { takeBody, truncateBody } from "../body.js";
 import { formatCountLine } from "../format.js";
-import { fetchListTotal, type ListFilter } from "../totals.js";
 import { getSuggestions } from "../suggestions.js";
 import {
   takeFlag,
@@ -20,7 +19,6 @@ import {
   pluck,
   lower,
   boolYesNo,
-  mapEnum,
   relativeTime,
   joinArray,
   custom,
@@ -36,246 +34,237 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-/**
- * One entry of `pr view --json statusCheckRollup`. The rollup is a union of two
- * shapes: a CheckRun (GitHub Actions et al.) reports its verdict in
- * `conclusion`, while a legacy commit StatusContext has no `conclusion` at all
- * and reports its verdict in `state`.
- */
-interface StatusCheck {
-  /** CheckRun: the check run name. */
-  name?: string;
-  /** StatusContext: the commit status context name. */
-  context?: string;
-  /** CheckRun: SUCCESS | FAILURE | SKIPPED | …; absent while still running. */
-  conclusion?: string;
-  /** StatusContext: SUCCESS | PENDING | FAILURE | ERROR | EXPECTED. */
-  state?: string;
-  /** CheckRun: QUEUED | IN_PROGRESS | COMPLETED. Carries no verdict. */
+interface GlabUser {
+  username?: string;
+}
+
+interface MrPipeline {
+  id: number;
   status?: string;
 }
 
-interface PrComment {
-  author?: { login: string };
+interface MrNote {
+  id?: number;
   body?: string;
-  createdAt?: string;
+  author?: GlabUser;
+  created_at?: string;
+  system?: boolean;
 }
 
-interface PrItem {
-  number: number;
+/** A note anchored to a diff line carries `position`; a plain thread note does not. */
+interface MrDiscussionNote extends MrNote {
+  position?: {
+    new_path?: string | null;
+    old_path?: string | null;
+    new_line?: number | null;
+    old_line?: number | null;
+  } | null;
+  resolved?: boolean;
+}
+
+interface MrDiscussion {
+  id: string;
+  notes?: MrDiscussionNote[];
+}
+
+interface MrApprovals {
+  approved?: boolean;
+  /** Premium and Ultimate only; absent on Free. */
+  approvals_required?: number;
+  approvals_left?: number;
+  approved_by?: { user?: GlabUser }[];
+}
+
+interface MrItem {
+  iid: number;
   title: string;
   state: string;
-  author: { login: string };
-  isDraft: boolean;
-  reviewDecision: string;
-  mergedAt?: string;
-  statusCheckRollup?: StatusCheck[];
-  body?: string;
-  comments?: PrComment[];
-  reviews?: unknown[];
-  mergedBy?: { login: string };
+  author?: GlabUser;
+  draft?: boolean;
+  detailed_merge_status?: string;
+  source_branch?: string;
+  target_branch?: string;
+  merged_at?: string | null;
+  merge_user?: GlabUser | null;
+  description?: string;
+  user_notes_count?: number;
+  reviewers?: GlabUser[];
+  head_pipeline?: MrPipeline | null;
 }
 
-interface PrReview {
-  id: number;
-  user?: { login: string };
-  body?: string;
-  state?: string;
-  submitted_at?: string;
-}
-
-interface PrReviewComment {
-  pull_request_review_id?: number;
-  user?: { login: string };
-  path?: string;
-  line?: number | null;
-  original_line?: number | null;
-  body?: string;
-  created_at?: string;
-}
-
-interface RevertResult {
-  number?: number;
-  html_url?: string;
+interface PipelineJob {
+  name?: string;
+  stage?: string;
+  status?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Classify a status check into a simple status category. */
-function classifyCheck(c: StatusCheck): "pass" | "fail" | "skip" | "pending" {
-  const conc = (c.conclusion ?? "").toUpperCase();
-  if (conc === "SUCCESS" || conc === "NEUTRAL") return "pass";
-  if (
-    conc === "FAILURE" ||
-    conc === "TIMED_OUT" ||
-    conc === "ACTION_REQUIRED" ||
-    conc === "STARTUP_FAILURE" ||
-    conc === "STALE" ||
-    conc === "CANCELLED"
-  )
-    return "fail";
-  if (conc === "SKIPPED") return "skip";
-  if (conc) return "pending";
-
-  // No conclusion: either a StatusContext, whose verdict lives in `state`, or a
-  // CheckRun that has not finished yet — a CheckRun's `status` (QUEUED /
-  // IN_PROGRESS / COMPLETED) never carries a verdict, so it stays pending.
-  const state = (c.state ?? "").toUpperCase();
-  if (state === "SUCCESS") return "pass";
-  if (state === "FAILURE" || state === "ERROR") return "fail";
-  if (state === "EXPECTED" || state === "NEUTRAL") return "skip";
-  return "pending";
+/** Classify a GitLab job status into a simple status category. */
+function classifyJob(job: PipelineJob): "pass" | "fail" | "skip" | "pending" {
+  switch (job.status) {
+    case "success":
+      return "pass";
+    case "failed":
+    case "canceled":
+    case "canceling":
+      return "fail";
+    case "skipped":
+    case "manual":
+      return "skip";
+    default:
+      return "pending";
+  }
 }
 
-function prRestPath(
-  ctx: RepoContext | undefined,
-  num: number,
-  suffix: string,
+function mrPath(iid: number, suffix = ""): string {
+  return `projects/:id/merge_requests/${iid}${suffix}`;
+}
+
+/** The trailing `-R` that keeps a suggested command runnable outside this repo. */
+function repoArg(ctx?: RepoContext): string {
+  return ctx && ctx.source !== "git" ? ` -R ${ctx.fullPath}` : "";
+}
+
+const PER_PAGE_MAX = "100";
+
+async function fetchMr(iid: number, ctx?: RepoContext): Promise<MrItem> {
+  return glabApiJson<MrItem>(mrPath(iid), { ctx });
+}
+
+/** Post a comment on a merge request. `glab mr note create` is still experimental. */
+async function postNote(
+  iid: number,
+  body: string,
+  ctx?: RepoContext,
+): Promise<void> {
+  await glabApiJson<MrNote>(mrPath(iid, "/notes"), {
+    ctx,
+    method: "POST",
+    fields: { body },
+  });
+}
+
+function summarize(
+  counts: Record<"pass" | "fail" | "skip" | "pending", number>,
+  total: number,
 ): string {
-  const repoPath = ctx
-    ? `repos/${ctx.owner}/${ctx.name}`
-    : "repos/{owner}/{repo}";
-  return `${repoPath}/pulls/${num}/${suffix}`;
+  const parts = [`${counts.pass} passed`, `${counts.fail} failed`];
+  if (counts.skip > 0) parts.push(`${counts.skip} skipped`);
+  if (counts.pending > 0) parts.push(`${counts.pending} pending`);
+  parts.push(`${total} total`);
+  return parts.join(", ");
 }
 
-function flattenPaginated<T>(items: T[] | T[][]): T[] {
-  if (items.length > 0 && Array.isArray(items[0]))
-    return (items as T[][]).flat();
-  return items as T[];
+function countJobs(
+  jobs: PipelineJob[],
+): Record<"pass" | "fail" | "skip" | "pending", number> {
+  const counts = { pass: 0, fail: 0, skip: 0, pending: 0 };
+  for (const job of jobs) counts[classifyJob(job)]++;
+  return counts;
 }
 
-async function ghApiPaginatedArray<T>(path: string): Promise<T[]> {
-  const pages = await ghJson<T[] | T[][]>([
-    "api",
-    path,
-    "--paginate",
-    "--slurp",
-  ]);
-  return flattenPaginated(pages);
+async function fetchPipelineJobs(
+  pipelineId: number,
+  ctx?: RepoContext,
+): Promise<PipelineJob[]> {
+  return glabApiJson<PipelineJob[]>(
+    `projects/:id/pipelines/${pipelineId}/jobs?per_page=${PER_PAGE_MAX}`,
+    { ctx },
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
 
-const REVIEW_MAP: Record<string, string> = {
-  APPROVED: "approved",
-  CHANGES_REQUESTED: "changes_requested",
-  REVIEW_REQUIRED: "required",
-};
-
-const REVIEW_STATE_MAP: Record<string, string> = {
-  APPROVED: "approved",
-  CHANGES_REQUESTED: "changes_requested",
-  COMMENTED: "commented",
-  DISMISSED: "dismissed",
-  PENDING: "pending",
-};
-
 const listSchema: FieldDef[] = [
-  field("number"),
+  field("iid"),
   field("title"),
   lower("state"),
-  pluck("author", "login", "author"),
-  boolYesNo("isDraft", "draft"),
-  mapEnum("reviewDecision", REVIEW_MAP, "none", "review"),
+  pluck("author", "username", "author"),
+  boolYesNo("draft"),
+  field("detailed_merge_status", "merge_status"),
 ];
 
-const LIST_JSON_FIELDS = "number,title,state,author,isDraft,reviewDecision";
-
-const PR_LIST_EXTRA_FIELDS: Record<string, ExtraFieldSpec> = {
-  body: { jsonKey: "body", def: field("body") },
-  createdAt: {
-    jsonKey: "createdAt",
-    def: relativeTime("createdAt", "created"),
+const MR_LIST_EXTRA_FIELDS: Record<string, ExtraFieldSpec> = {
+  description: { jsonKey: "description", def: field("description") },
+  created_at: {
+    jsonKey: "created_at",
+    def: relativeTime("created_at", "created"),
   },
   labels: { jsonKey: "labels", def: joinArray("labels", "name", "labels") },
   milestone: {
     jsonKey: "milestone",
     def: pluck("milestone", "title", "milestone"),
   },
-  mergedAt: { jsonKey: "mergedAt", def: relativeTime("mergedAt", "merged_at") },
-  url: { jsonKey: "url", def: field("url") },
+  merged_at: { jsonKey: "merged_at", def: relativeTime("merged_at") },
+  source_branch: { jsonKey: "source_branch", def: field("source_branch") },
+  target_branch: { jsonKey: "target_branch", def: field("target_branch") },
+  url: { jsonKey: "web_url", def: field("web_url", "url") },
 };
 
 const viewSchema: FieldDef[] = [
-  field("number"),
+  field("iid"),
   field("title"),
   lower("state"),
-  pluck("author", "login", "author"),
-  boolYesNo("isDraft", "draft"),
-  custom("merged", (item: PrItem) => {
-    if ((item.state ?? "").toUpperCase() === "MERGED")
-      return item.mergedAt ?? "yes";
-    return "no";
-  }),
-  custom("checks", (item: PrItem) => {
-    const checks = item.statusCheckRollup;
-    if (!Array.isArray(checks) || checks.length === 0)
-      return "0 passed, 0 failed — this PR has no CI checks configured";
-    const passed = checks.filter(
-      (c: StatusCheck) => classifyCheck(c) === "pass",
-    ).length;
-    const failed = checks.filter(
-      (c: StatusCheck) => classifyCheck(c) === "fail",
-    ).length;
-    const skipped = checks.filter(
-      (c: StatusCheck) => classifyCheck(c) === "skip",
-    ).length;
-    const parts = [`${passed} passed`, `${failed} failed`];
-    if (skipped > 0) parts.push(`${skipped} skipped`);
-    parts.push(`${checks.length} total`);
-    return parts.join(", ");
-  }),
-  custom("body", (item: PrItem) => truncateBody(item.body, 500)),
+  pluck("author", "username", "author"),
+  boolYesNo("draft"),
+  field("source_branch"),
+  field("target_branch"),
+  field("detailed_merge_status", "merge_status"),
+  custom("merged", (item: MrItem) =>
+    item.state === "merged" ? (item.merged_at ?? "yes") : "no",
+  ),
+  custom("pipeline", (item: MrItem) =>
+    item.head_pipeline
+      ? `${item.head_pipeline.status ?? "unknown"} — pipeline ${item.head_pipeline.id}`
+      : "no pipeline for the head commit",
+  ),
+  joinArray("reviewers", "username", "reviewers"),
+  custom("body", (item: MrItem) => truncateBody(item.description, 500)),
 ];
 
 const viewSchemaFull: FieldDef[] = viewSchema.map((f) =>
   "as" in f && f.as === "body"
-    ? custom("body", (item: PrItem) =>
-        typeof item.body === "string" ? item.body : "",
+    ? custom("body", (item: MrItem) =>
+        typeof item.description === "string" ? item.description : "",
       )
     : f,
 );
-
-const VIEW_JSON_FIELDS =
-  "number,title,state,author,isDraft,mergedAt,statusCheckRollup,body,comments,reviews";
 
 // ---------------------------------------------------------------------------
 // Help
 // ---------------------------------------------------------------------------
 
-// --search is intentionally listed: prList rejects it with a dedicated hint
-// pointing at `gh-axi search`, so rejectUnknownFlags lets it through to that
-// handler instead of shadowing the targeted error.
-const PR_FLAGS: Record<string, readonly string[]> = {
+const MR_FLAGS: Record<string, readonly string[]> = {
   list: [
     "--fields",
     "--state",
     "--label",
     "--assignee",
     "--author",
-    "--base",
-    "--head",
+    "--target-branch",
+    "--source-branch",
     "--draft",
-    "--limit",
     "--search",
+    "--limit",
   ],
   view: ["--comments", "--reviews", "--full"],
   create: [
     "--title",
     "--body",
     "--body-file",
-    "--base",
-    "--head",
+    "--target-branch",
+    "--source-branch",
     "--draft",
     "--assignee",
     "--reviewer",
     "--label",
     "--milestone",
-    "--project",
+    "--remove-source-branch",
   ],
   edit: [
     "--title",
@@ -288,279 +277,251 @@ const PR_FLAGS: Record<string, readonly string[]> = {
     "--add-reviewer",
     "--remove-reviewer",
     "--milestone",
-    "--base",
+    "--target-branch",
   ],
-  close: ["--comment"],
+  close: [],
   merge: [
     "--method",
     "--merge",
     "--squash",
     "--rebase",
     "--auto",
-    "--delete-branch",
-    "--body",
-    "--body-file",
-    "--subject",
-  ],
-  review: [
-    "--approve",
-    "--request-changes",
-    "--comment",
+    "--remove-source-branch",
     "--body",
     "--body-file",
   ],
+  review: ["--approve", "--revoke", "--comment", "--body", "--body-file"],
   checks: [],
   diff: ["--full"],
   checkout: [],
   ready: [],
   reopen: [],
   comment: ["--body", "--body-file"],
-  "update-branch": [],
-  revert: [],
+  rebase: ["--skip-ci"],
 };
 
-export const PR_HELP = `usage: gh-axi pr <subcommand> [flags]
-subcommands[15]:
-  list, view <number>, create, edit <number>, close <number>, merge <number>, review <number>, checks <number>, diff <number>, checkout <number>, ready <number>, reopen <number>, comment <number>, update-branch <number>, revert <number>
+export const MR_HELP = `usage: glab-axi mr <subcommand> [flags]
+subcommands[14]:
+  list, view <iid>, create, edit <iid>, close <iid>, merge <iid>, review <iid>, checks <iid>, diff <iid>, checkout <iid>, ready <iid>, reopen <iid>, comment <iid>, rebase <iid>
 flags{list}:
-  --state <open|closed|all>, --label (repeatable), --assignee, --author, --base, --head, --draft, --limit <n> (default 30), --fields <a,b,c>
+  --state <opened|closed|merged|locked|all>, --label (repeatable), --assignee, --author, --target-branch, --source-branch, --draft, --search <text>, --limit <n> (default 30), --fields <a,b,c>
 flags{view}:
-  --comments, --reviews (show review submissions and inline review comments), --full (show complete body without truncation)
+  --comments, --reviews (show approvals and diff review threads), --full (show complete description without truncation)
 flags{create}:
-  --title <text> (required), --body <text> or --body-file <path>, --base, --head, --draft, --assignee <login> (repeatable), --reviewer <login> (repeatable), --label <name> (repeatable), --milestone, --project <name> (repeatable)
+  --title <text> (required), --body <text> or --body-file <path>, --target-branch, --source-branch, --draft, --assignee <username> (repeatable), --reviewer <username> (repeatable), --label <name> (repeatable), --milestone, --remove-source-branch
 flags{edit}:
-  --title <text>, --body <text> or --body-file <path>, --add-label <name> (repeatable), --remove-label <name> (repeatable), --add-assignee <login> (repeatable), --remove-assignee <login> (repeatable), --add-reviewer <login> (repeatable), --remove-reviewer <login> (repeatable), --milestone
+  --title <text>, --body <text> or --body-file <path>, --add-label <name> (repeatable), --remove-label <name> (repeatable), --add-assignee <username> (repeatable), --remove-assignee <username> (repeatable), --add-reviewer <username> (repeatable), --remove-reviewer <username> (repeatable), --milestone, --target-branch
 flags{merge}:
-  --method <merge|squash|rebase>, --merge, --squash, --rebase, --auto, --delete-branch, --body <text> or --body-file <path>, --subject
+  --method <merge|squash|rebase>, --merge, --squash, --rebase, --auto (merge when the pipeline succeeds), --remove-source-branch, --body <text> or --body-file <path> (merge commit message)
 flags{review}:
-  --approve, --request-changes, --comment, --body <text> or --body-file <path>
+  --approve, --revoke (remove your approval), --comment, --body <text> or --body-file <path>
 flags{comment}:
   --body <text> or --body-file <path> (required)
 flags{checks}:
   (none)
 flags{diff}:
   --full (show complete diff without truncation)
+flags{rebase}:
+  --skip-ci
 examples:
-  gh-axi pr list --state open --label bug
-  gh-axi pr view 42 --comments
-  gh-axi pr view 42 --reviews
-  gh-axi pr comment 42 --body-file review.md
-  gh-axi pr merge 42 --squash --delete-branch`;
+  glab-axi mr list --state opened --label bug
+  glab-axi mr view 42 --comments
+  glab-axi mr view 42 --reviews
+  glab-axi mr comment 42 --body-file review.md
+  glab-axi mr merge 42 --squash --remove-source-branch`;
 
 // ---------------------------------------------------------------------------
 // Subcommands
 // ---------------------------------------------------------------------------
 
-async function prList(args: string[], ctx?: RepoContext): Promise<string> {
-  if (args.includes("--search")) {
-    throw new AxiError(
-      'pr list does not support --search. Use `gh-axi search prs "<query>"` instead for full-text search with total counts.',
-      "VALIDATION_ERROR",
-    );
-  }
+async function mrList(args: string[], ctx?: RepoContext): Promise<string> {
   const fieldsArg = takeFlag(args, "--fields");
-  const { extraDefs, extraJsonKeys } = parseFields(
-    fieldsArg,
-    PR_LIST_EXTRA_FIELDS,
-  );
-  const state = takeFlag(args, "--state") ?? "open";
+  const { extraDefs } = parseFields(fieldsArg, MR_LIST_EXTRA_FIELDS);
+  const state = takeFlag(args, "--state") ?? "opened";
   const labels = takeAllFlags(args, "--label");
   const assignee = takeFlag(args, "--assignee");
   const author = takeFlag(args, "--author");
-  const base = takeFlag(args, "--base");
-  const head = takeFlag(args, "--head");
+  const targetBranch = takeFlag(args, "--target-branch");
+  const sourceBranch = takeFlag(args, "--source-branch");
   const draft = takeBoolFlag(args, "--draft");
+  const search = takeFlag(args, "--search");
   const limit = takeFlag(args, "--limit") ?? "30";
 
-  const jsonFields =
-    extraJsonKeys.length > 0
-      ? LIST_JSON_FIELDS + "," + extraJsonKeys.join(",")
-      : LIST_JSON_FIELDS;
-  const ghArgs = [
-    "pr",
-    "list",
-    "--json",
-    jsonFields,
-    "--state",
-    state,
-    "--limit",
-    limit,
-  ];
-  pushRepeated(ghArgs, "--label", labels);
-  if (assignee) ghArgs.push("--assignee", assignee);
-  if (author) ghArgs.push("--author", author);
-  if (base) ghArgs.push("--base", base);
-  if (head) ghArgs.push("--head", head);
-  if (draft) ghArgs.push("--draft");
+  const query = new URLSearchParams({ state, per_page: limit });
+  if (labels.length > 0) query.set("labels", labels.join(","));
+  if (assignee) query.set("assignee_username", assignee);
+  if (author) query.set("author_username", author);
+  if (targetBranch) query.set("target_branch", targetBranch);
+  if (sourceBranch) query.set("source_branch", sourceBranch);
+  if (draft) query.set("draft", "true");
+  if (search) query.set("search", search);
 
-  const items = await ghJson<PrItem[]>(ghArgs, ctx);
-  const isEmpty = items.length === 0;
-  const limitNum = Number(limit);
+  const items = await glabApiJson<MrItem[]>(
+    `projects/:id/merge_requests?${query.toString()}`,
+    { ctx },
+  );
 
-  // Only a page truncated by the limit needs a total; a short page already
-  // shows every match.
-  let totalCount: number | undefined;
-  if (items.length === limitNum && ctx) {
-    const filters: ListFilter[] = [];
-    for (const label of labels)
-      filters.push({ key: "label", value: label, list: true });
-    if (assignee) filters.push({ key: "assignee", value: assignee });
-    if (author) filters.push({ key: "author", value: author });
-    if (base) filters.push({ key: "base", value: base });
-    if (head) filters.push({ key: "head", value: head });
-    if (draft) filters.push({ key: "draft", value: "true" });
-
-    totalCount = await fetchListTotal(ctx, "pullRequests", state, filters);
-  }
   const countLine = formatCountLine({
     count: items.length,
-    limit: limitNum,
-    totalCount,
+    limit: Number(limit),
   });
   const extendedSchema =
     extraDefs.length > 0 ? [...listSchema, ...extraDefs] : listSchema;
 
   return renderOutput([
     countLine,
-    renderList("pull_requests", items, extendedSchema),
+    renderList("merge_requests", items, extendedSchema),
     renderHelp(
-      getSuggestions({ domain: "pr", action: "list", isEmpty, repo: ctx }),
+      getSuggestions({
+        domain: "mr",
+        action: "list",
+        isEmpty: items.length === 0,
+        repo: ctx,
+      }),
     ),
   ]);
 }
 
-async function prView(args: string[], ctx?: RepoContext): Promise<string> {
+async function mrView(args: string[], ctx?: RepoContext): Promise<string> {
   const includeComments = takeBoolFlag(args, "--comments");
   const includeReviews = takeBoolFlag(args, "--reviews");
   const full = takeBoolFlag(args, "--full");
-  const num = takeNumber(args, "PR");
+  const iid = takeNumber(args, "MR");
 
-  // Always fetch comments + review summaries (for count or full rendering)
-  const ghArgs = ["pr", "view", String(num), "--json", VIEW_JSON_FIELDS];
-  const pr = await ghJson<PrItem>(ghArgs, ctx);
-
+  const mr = await fetchMr(iid, ctx);
   const schema = [...(full ? viewSchemaFull : viewSchema)];
-  if (includeComments && Array.isArray(pr.comments)) {
+
+  if (includeComments) {
+    const notes = await glabApiJson<MrNote[]>(
+      mrPath(iid, `/notes?per_page=${PER_PAGE_MAX}`),
+      { ctx },
+    );
+    const userNotes = notes.filter((note) => !note.system);
     schema.push(
-      custom("comments", (item: PrItem) =>
-        (item.comments ?? []).map((c: PrComment) => ({
-          author: c.author?.login ?? "unknown",
-          body: c.body ?? "",
-          created: c.createdAt ?? "",
+      custom("comments", () =>
+        userNotes.map((note) => ({
+          author: note.author?.username ?? "unknown",
+          body: note.body ?? "",
+          created: note.created_at ?? "",
         })),
       ),
     );
   } else {
-    const commentCount = Array.isArray(pr.comments) ? pr.comments.length : 0;
     schema.push(
       custom(
         "comment_count",
-        () => `${commentCount} — use --comments to see full comments`,
+        (item: MrItem) =>
+          `${item.user_notes_count ?? 0} — use --comments to see full comments`,
       ),
     );
   }
 
   if (includeReviews) {
-    // gh pr view --json reviews returns GraphQL node IDs, which don't match
-    // the numeric review IDs on inline review comments. Fetch both via REST
-    // so we can correlate inline comments back to their parent review.
-    const reviews = await ghApiPaginatedArray<PrReview>(
-      prRestPath(ctx, num, "reviews"),
+    const approvals = await glabApiJson<MrApprovals>(
+      mrPath(iid, "/approvals"),
+      { ctx },
     );
-    let inlineComments: PrReviewComment[] = [];
-    if (reviews.length > 0) {
-      inlineComments = await ghApiPaginatedArray<PrReviewComment>(
-        prRestPath(ctx, num, "comments"),
-      );
-    }
-    const commentsByReview = new Map<number, PrReviewComment[]>();
-    for (const c of inlineComments) {
-      if (typeof c.pull_request_review_id === "number") {
-        const list = commentsByReview.get(c.pull_request_review_id) ?? [];
-        list.push(c);
-        commentsByReview.set(c.pull_request_review_id, list);
-      }
-    }
+    const discussions = await glabApiJson<MrDiscussion[]>(
+      mrPath(iid, `/discussions?per_page=${PER_PAGE_MAX}`),
+      { ctx },
+    );
     schema.push(
-      custom("reviews", () =>
-        reviews.map((r) => {
-          const stateUpper = (r.state ?? "").toUpperCase();
-          const inline = commentsByReview.get(r.id) ?? [];
-          return {
-            author: r.user?.login ?? "unknown",
-            state:
-              REVIEW_STATE_MAP[stateUpper] ??
-              stateUpper.toLowerCase() ??
-              "unknown",
-            submitted: r.submitted_at ?? "",
-            body: r.body ?? "",
-            inline_comments: inline.map((c) => ({
-              author: c.user?.login ?? "unknown",
-              path: c.path ?? "",
-              line: c.line ?? c.original_line ?? null,
-              body: c.body ?? "",
-              created: c.created_at ?? "",
-            })),
-          };
-        }),
+      custom("approvals", () => ({
+        approved: approvals.approved ? "yes" : "no",
+        required: approvals.approvals_required ?? null,
+        left: approvals.approvals_left ?? null,
+        approved_by:
+          (approvals.approved_by ?? [])
+            .map((entry) => entry.user?.username ?? "unknown")
+            .join(",") || "none",
+      })),
+      custom("review_threads", () =>
+        discussions
+          .map((discussion) => (discussion.notes ?? [])[0])
+          .filter((note): note is MrDiscussionNote => !!note && !!note.position)
+          .map((note) => ({
+            author: note.author?.username ?? "unknown",
+            path: note.position?.new_path ?? note.position?.old_path ?? "",
+            line: note.position?.new_line ?? note.position?.old_line ?? null,
+            resolved: note.resolved ? "yes" : "no",
+            body: note.body ?? "",
+          })),
       ),
     );
   } else {
-    const reviewCount = Array.isArray(pr.reviews) ? pr.reviews.length : 0;
     schema.push(
       custom(
-        "review_count",
-        () => `${reviewCount} — use --reviews to see full reviews`,
+        "review_summary",
+        () => "use --reviews to see approvals and diff review threads",
       ),
     );
   }
 
-  return renderOutput([renderDetail("pull_request", pr, schema)]);
+  return renderOutput([renderDetail("merge_request", mr, schema)]);
 }
 
-async function prCreate(args: string[], ctx?: RepoContext): Promise<string> {
+async function mrCreate(args: string[], ctx?: RepoContext): Promise<string> {
   const title = takeFlag(args, "--title");
   if (!title) throw new AxiError("--title is required", "VALIDATION_ERROR");
   const body = takeBody(args);
-  const base = takeFlag(args, "--base");
-  const head = takeFlag(args, "--head");
+  const targetBranch = takeFlag(args, "--target-branch");
+  const sourceBranch = takeFlag(args, "--source-branch");
   const draft = takeBoolFlag(args, "--draft");
+  const removeSourceBranch = takeBoolFlag(args, "--remove-source-branch");
   const assignees = takeAllFlags(args, "--assignee");
   const reviewers = takeAllFlags(args, "--reviewer");
   const labels = takeAllFlags(args, "--label");
   const milestone = takeFlag(args, "--milestone");
-  const projects = takeAllFlags(args, "--project");
 
-  const ghArgs = ["pr", "create", "--title", title];
-  if (body !== undefined) ghArgs.push("--body", body);
-  if (base) ghArgs.push("--base", base);
-  if (head) ghArgs.push("--head", head);
-  if (draft) ghArgs.push("--draft");
-  pushRepeated(ghArgs, "--assignee", assignees);
-  pushRepeated(ghArgs, "--reviewer", reviewers);
-  pushRepeated(ghArgs, "--label", labels);
-  if (milestone) ghArgs.push("--milestone", milestone);
-  pushRepeated(ghArgs, "--project", projects);
+  // --description is always passed: glab otherwise falls back to an editor or a
+  // prompt, and --yes only skips the final submission confirmation.
+  const glabArgs = [
+    "mr",
+    "create",
+    "--title",
+    title,
+    "--description",
+    body ?? "",
+    "--yes",
+  ];
+  if (targetBranch) glabArgs.push("--target-branch", targetBranch);
+  if (sourceBranch) glabArgs.push("--source-branch", sourceBranch);
+  if (draft) glabArgs.push("--draft");
+  if (removeSourceBranch) glabArgs.push("--remove-source-branch");
+  pushRepeated(glabArgs, "--assignee", assignees);
+  pushRepeated(glabArgs, "--reviewer", reviewers);
+  pushRepeated(glabArgs, "--label", labels);
+  if (milestone) glabArgs.push("--milestone", milestone);
 
-  const stdout = await ghExec(ghArgs, ctx);
-  // Parse PR number from the emitted URL: https://<host>/OWNER/REPO/pull/123
-  const urlMatch = stdout.match(/\/pull\/(\d+)/);
-  const num = urlMatch ? Number(urlMatch[1]) : undefined;
+  const stdout = await glabExec(glabArgs, ctx);
+  // Parse the iid from the emitted URL: https://<host>/<path>/-/merge_requests/42
+  const urlMatch = stdout.match(/\/-\/merge_requests\/(\d+)/);
+  const iid = urlMatch ? Number(urlMatch[1]) : undefined;
   const url = stdout.trim().split("\n").pop()?.trim() ?? "";
 
   return renderOutput([
-    renderDetail("created", { number: num ?? url, url }, [
-      field("number"),
+    renderDetail("created", { iid: iid ?? url, url }, [
+      field("iid"),
       field("url"),
     ]),
     renderHelp(
-      getSuggestions({ domain: "pr", action: "create", id: num, repo: ctx }),
+      getSuggestions({ domain: "mr", action: "create", id: iid, repo: ctx }),
     ),
   ]);
 }
 
-async function prEdit(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
+/** glab mr update replaces assignees/reviewers unless each name carries a +/! prefix. */
+function pushPrefixed(
+  glabArgs: string[],
+  flag: string,
+  values: string[],
+  prefix: string,
+): void {
+  for (const value of values) glabArgs.push(flag, `${prefix}${value}`);
+}
+
+async function mrEdit(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
   const title = takeFlag(args, "--title");
   const body = takeBody(args);
   const addLabels = takeAllFlags(args, "--add-label");
@@ -570,74 +531,123 @@ async function prEdit(args: string[], ctx?: RepoContext): Promise<string> {
   const addReviewers = takeAllFlags(args, "--add-reviewer");
   const removeReviewers = takeAllFlags(args, "--remove-reviewer");
   const milestone = takeFlag(args, "--milestone");
-  const base = takeFlag(args, "--base");
+  const targetBranch = takeFlag(args, "--target-branch");
 
-  const ghArgs = ["pr", "edit", String(num)];
-  if (title) ghArgs.push("--title", title);
-  if (body !== undefined) ghArgs.push("--body", body);
-  pushRepeated(ghArgs, "--add-label", addLabels);
-  pushRepeated(ghArgs, "--remove-label", removeLabels);
-  pushRepeated(ghArgs, "--add-assignee", addAssignees);
-  pushRepeated(ghArgs, "--remove-assignee", removeAssignees);
-  pushRepeated(ghArgs, "--add-reviewer", addReviewers);
-  pushRepeated(ghArgs, "--remove-reviewer", removeReviewers);
-  if (milestone) ghArgs.push("--milestone", milestone);
-  if (base) ghArgs.push("--base", base);
+  const glabArgs = ["mr", "update", String(iid), "--yes"];
+  if (title) glabArgs.push("--title", title);
+  if (body !== undefined) glabArgs.push("--description", body);
+  pushRepeated(glabArgs, "--label", addLabels);
+  pushRepeated(glabArgs, "--unlabel", removeLabels);
+  pushPrefixed(glabArgs, "--assignee", addAssignees, "+");
+  pushPrefixed(glabArgs, "--assignee", removeAssignees, "!");
+  pushPrefixed(glabArgs, "--reviewer", addReviewers, "+");
+  pushPrefixed(glabArgs, "--reviewer", removeReviewers, "!");
+  if (milestone) glabArgs.push("--milestone", milestone);
+  if (targetBranch) glabArgs.push("--target-branch", targetBranch);
 
-  await ghExec(ghArgs, ctx);
+  await glabExec(glabArgs, ctx);
   return renderOutput([
-    renderDetail("edited", { number: num, status: "ok" }, [
-      field("number"),
+    renderDetail("edited", { iid, status: "ok" }, [
+      field("iid"),
       field("status"),
     ]),
     renderHelp(
-      getSuggestions({ domain: "pr", action: "edit", id: num, repo: ctx }),
+      getSuggestions({ domain: "mr", action: "edit", id: iid, repo: ctx }),
     ),
   ]);
 }
 
-async function prClose(args: string[], ctx?: RepoContext): Promise<string> {
-  const comment = takeFlag(args, "--comment");
-  const num = takeNumber(args, "PR");
+function alreadyBlock(
+  iid: number,
+  action: string,
+  state: string,
+  ctx?: RepoContext,
+): string {
+  return renderOutput([
+    renderDetail("merge_request", { iid, state, already: true }, [
+      field("iid"),
+      field("state"),
+      field("already"),
+    ]),
+    renderHelp(getSuggestions({ domain: "mr", action, id: iid, repo: ctx })),
+  ]);
+}
 
-  // Idempotent: check current state
-  const pr = await ghJson<Pick<PrItem, "state">>(
-    ["pr", "view", String(num), "--json", "state"],
-    ctx,
-  );
-  const state = (pr.state ?? "").toUpperCase();
-  if (state === "CLOSED" || state === "MERGED") {
+async function mrClose(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
+
+  const mr = await fetchMr(iid, ctx);
+  if (mr.state === "closed" || mr.state === "merged") {
+    return alreadyBlock(iid, "close", mr.state, ctx);
+  }
+
+  await glabExec(["mr", "close", String(iid)], ctx);
+  return renderOutput([
+    renderDetail("closed", { iid, status: "ok" }, [
+      field("iid"),
+      field("status"),
+    ]),
+    renderHelp(
+      getSuggestions({ domain: "mr", action: "close", id: iid, repo: ctx }),
+    ),
+  ]);
+}
+
+async function mrReopen(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
+
+  const mr = await fetchMr(iid, ctx);
+  if (mr.state === "opened") {
+    return alreadyBlock(iid, "reopen", "opened", ctx);
+  }
+
+  await glabExec(["mr", "reopen", String(iid)], ctx);
+  return renderOutput([
+    renderDetail("reopened", { iid, status: "ok" }, [
+      field("iid"),
+      field("status"),
+    ]),
+    renderHelp(
+      getSuggestions({ domain: "mr", action: "reopen", id: iid, repo: ctx }),
+    ),
+  ]);
+}
+
+async function mrReady(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
+
+  const mr = await fetchMr(iid, ctx);
+  if (!mr.draft) {
     return renderOutput([
-      renderDetail(
-        "pull_request",
-        { number: num, state: state.toLowerCase(), already: true },
-        [field("number"), field("state"), field("already")],
-      ),
+      renderDetail("merge_request", { iid, draft: "no", already: true }, [
+        field("iid"),
+        field("draft"),
+        field("already"),
+      ]),
       renderHelp(
-        getSuggestions({ domain: "pr", action: "close", id: num, repo: ctx }),
+        getSuggestions({ domain: "mr", action: "ready", id: iid, repo: ctx }),
       ),
     ]);
   }
 
-  const ghArgs = ["pr", "close", String(num)];
-  if (comment) ghArgs.push("--comment", comment);
-  await ghExec(ghArgs, ctx);
-
+  await glabExec(["mr", "update", String(iid), "--ready", "--yes"], ctx);
   return renderOutput([
-    renderDetail("closed", { number: num, status: "ok" }, [
-      field("number"),
+    renderDetail("ready", { iid, status: "ok" }, [
+      field("iid"),
       field("status"),
     ]),
     renderHelp(
-      getSuggestions({ domain: "pr", action: "close", id: num, repo: ctx }),
+      getSuggestions({ domain: "mr", action: "ready", id: iid, repo: ctx }),
     ),
   ]);
 }
 
-async function prMerge(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
+const MERGE_METHODS = ["merge", "squash", "rebase"];
+
+async function mrMerge(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
   const explicitMethod = takeFlag(args, "--method");
-  const shorthandMethods = ["merge", "squash", "rebase"].filter((candidate) =>
+  const shorthandMethods = MERGE_METHODS.filter((candidate) =>
     takeBoolFlag(args, `--${candidate}`),
   );
   if (shorthandMethods.length > 1) {
@@ -657,371 +667,217 @@ async function prMerge(args: string[], ctx?: RepoContext): Promise<string> {
     );
   }
   const method = explicitMethod ?? shorthandMethods[0];
-  if (method && !["merge", "squash", "rebase"].includes(method)) {
+  if (method && !MERGE_METHODS.includes(method)) {
     throw new AxiError(
       "--method must be one of: merge, squash, rebase",
       "VALIDATION_ERROR",
     );
   }
   const auto = takeBoolFlag(args, "--auto");
-  const deleteBranch = takeBoolFlag(args, "--delete-branch");
+  const removeSourceBranch = takeBoolFlag(args, "--remove-source-branch");
   const body = takeBody(args);
-  const subject = takeFlag(args, "--subject");
 
-  // Idempotent: check if already merged
-  const pr = await ghJson<Pick<PrItem, "state" | "mergedBy" | "mergedAt">>(
-    ["pr", "view", String(num), "--json", "state,mergedBy,mergedAt"],
-    ctx,
-  );
-  if ((pr.state ?? "").toUpperCase() === "MERGED") {
+  const mr = await fetchMr(iid, ctx);
+  if (mr.state === "merged") {
     return renderOutput([
       renderDetail(
-        "pull_request",
+        "merge_request",
         {
-          number: num,
+          iid,
           state: "merged",
-          merged_by: pr.mergedBy?.login ?? null,
-          merged_at: pr.mergedAt ?? null,
+          merged_by: mr.merge_user?.username ?? null,
+          merged_at: mr.merged_at ?? null,
         },
-        [
-          field("number"),
-          field("state"),
-          field("merged_by"),
-          field("merged_at"),
-        ],
+        [field("iid"), field("state"), field("merged_by"), field("merged_at")],
       ),
       renderHelp(
-        getSuggestions({ domain: "pr", action: "merge", id: num, repo: ctx }),
+        getSuggestions({ domain: "mr", action: "merge", id: iid, repo: ctx }),
       ),
     ]);
   }
 
-  const ghArgs = ["pr", "merge", String(num)];
-  if (method) ghArgs.push("--" + method);
-  if (auto) ghArgs.push("--auto");
-  if (deleteBranch) ghArgs.push("--delete-branch");
-  if (body !== undefined) ghArgs.push("--body", body);
-  if (subject) ghArgs.push("--subject", subject);
+  const glabArgs = ["mr", "merge", String(iid), "--yes"];
+  // A merge commit is glab's default, so only squash and rebase need a flag.
+  if (method === "squash") glabArgs.push("--squash");
+  if (method === "rebase") glabArgs.push("--rebase");
+  if (auto) glabArgs.push("--auto-merge");
+  if (removeSourceBranch) glabArgs.push("--remove-source-branch");
+  if (body !== undefined) glabArgs.push("--message", body);
 
-  await ghExec(ghArgs, ctx);
+  await glabExec(glabArgs, ctx);
 
   return renderOutput([
-    renderDetail(
-      "merged",
-      { number: num, status: "ok", method: method ?? "default" },
-      [field("number"), field("status"), field("method")],
-    ),
-    renderHelp(
-      getSuggestions({ domain: "pr", action: "merge", id: num, repo: ctx }),
-    ),
-  ]);
-}
-
-async function prReview(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
-  const approve = takeBoolFlag(args, "--approve");
-  const requestChanges = takeBoolFlag(args, "--request-changes");
-  const commentFlag = takeBoolFlag(args, "--comment");
-  const body = takeBody(args);
-
-  const ghArgs = ["pr", "review", String(num)];
-  if (approve) ghArgs.push("--approve");
-  else if (requestChanges) ghArgs.push("--request-changes");
-  else if (commentFlag) ghArgs.push("--comment");
-  if (body !== undefined) ghArgs.push("--body", body);
-
-  await ghExec(ghArgs, ctx);
-
-  const action = approve
-    ? "approved"
-    : requestChanges
-      ? "changes_requested"
-      : "commented";
-  return renderOutput([
-    renderDetail("review", { number: num, action }, [
-      field("number"),
-      field("action"),
+    renderDetail("merged", { iid, status: "ok", method: method ?? "merge" }, [
+      field("iid"),
+      field("status"),
+      field("method"),
     ]),
     renderHelp(
-      getSuggestions({ domain: "pr", action: "review", id: num, repo: ctx }),
+      getSuggestions({ domain: "mr", action: "merge", id: iid, repo: ctx }),
     ),
   ]);
 }
 
-async function prChecks(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
+async function mrReview(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
+  const approve = takeBoolFlag(args, "--approve");
+  const revoke = takeBoolFlag(args, "--revoke");
+  takeBoolFlag(args, "--comment");
+  if (approve && revoke) {
+    throw new AxiError(
+      "Choose either --approve or --revoke, not both",
+      "VALIDATION_ERROR",
+    );
+  }
+  // Without an approval verdict a review is only its comment, so the body is
+  // then the whole payload and must be present.
+  const body =
+    !approve && !revoke
+      ? takeBody(args, { required: true, label: "review comment" })
+      : takeBody(args);
 
-  // Use pr view --json statusCheckRollup instead of pr checks --json which
-  // can error on PRs with unusual check data
-  const pr = await ghJson<Pick<PrItem, "statusCheckRollup">>(
-    ["pr", "view", String(num), "--json", "statusCheckRollup"],
-    ctx,
-  );
-  const checks: StatusCheck[] = Array.isArray(pr.statusCheckRollup)
-    ? pr.statusCheckRollup
-    : [];
+  if (approve) await glabExec(["mr", "approve", String(iid)], ctx);
+  if (revoke) await glabExec(["mr", "revoke", String(iid)], ctx);
+  if (body !== undefined) await postNote(iid, body, ctx);
 
-  if (checks.length === 0) {
+  const action = approve ? "approved" : revoke ? "revoked" : "commented";
+  return renderOutput([
+    renderDetail("review", { iid, action }, [field("iid"), field("action")]),
+    renderHelp(
+      getSuggestions({ domain: "mr", action: "review", id: iid, repo: ctx }),
+    ),
+  ]);
+}
+
+const checksSchema: FieldDef[] = [
+  custom("name", (job: PipelineJob) => job.name ?? "job"),
+  field("stage"),
+  field("status"),
+];
+
+async function mrChecks(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
+
+  const mr = await fetchMr(iid, ctx);
+  const pipeline = mr.head_pipeline;
+  if (!pipeline) {
     return renderOutput([
       encode({
-        checks: "0 passed, 0 failed — this PR has no CI checks configured",
+        checks: "no pipeline ran for the head commit of this merge request",
       }),
     ]);
   }
 
-  // Pre-compute summary counts so agents don't have to count rows
-  const passed = checks.filter(
-    (c: StatusCheck) => classifyCheck(c) === "pass",
-  ).length;
-  const failed = checks.filter(
-    (c: StatusCheck) => classifyCheck(c) === "fail",
-  ).length;
-  const skipped = checks.filter(
-    (c: StatusCheck) => classifyCheck(c) === "skip",
-  ).length;
-  const pending = checks.length - passed - failed - skipped;
+  const jobs = await fetchPipelineJobs(pipeline.id, ctx);
+  const counts = countJobs(jobs);
 
-  const summaryParts = [`${passed} passed`, `${failed} failed`];
-  if (skipped > 0) summaryParts.push(`${skipped} skipped`);
-  if (pending > 0) summaryParts.push(`${pending} pending`);
-  summaryParts.push(`${checks.length} total`);
-
-  const checksSchema: FieldDef[] = [
-    custom("name", (c: StatusCheck) => c.name ?? c.context ?? "check"),
-    custom("conclusion", (c: StatusCheck) => classifyCheck(c)),
-  ];
+  const suggestions = getSuggestions({
+    domain: "mr",
+    action: "checks",
+    id: iid,
+    repo: ctx,
+  });
+  if (counts.fail > 0) {
+    suggestions.unshift(
+      `Run \`glab-axi ci view ${pipeline.id}${repoArg(ctx)}\` to inspect the failing pipeline`,
+    );
+  }
 
   return renderOutput([
-    encode({ summary: summaryParts.join(", ") }),
-    renderList("checks", checks, checksSchema),
-    renderHelp(
-      getSuggestions({ domain: "pr", action: "checks", id: num, repo: ctx }),
-    ),
+    encode({
+      pipeline: pipeline.id,
+      status: pipeline.status ?? "unknown",
+      summary: summarize(counts, jobs.length),
+    }),
+    renderList("checks", jobs, checksSchema),
+    renderHelp(suggestions),
   ]);
 }
 
 const DIFF_TRUNCATE_LIMIT = 4000;
 
-async function prDiff(args: string[], ctx?: RepoContext): Promise<string> {
+async function mrDiff(args: string[], ctx?: RepoContext): Promise<string> {
   const full = takeBoolFlag(args, "--full");
-  const num = takeNumber(args, "PR");
-  const diff = await ghExec(["pr", "diff", String(num)], ctx);
+  const iid = takeNumber(args, "MR");
+  const diff = await glabExec(["mr", "diff", String(iid), "--raw"], ctx);
 
   const shouldTruncate = !full && diff.length > DIFF_TRUNCATE_LIMIT;
-  const prDiffBlock: Record<string, unknown> = {
-    number: num,
+  const diffBlock: Record<string, unknown> = {
+    iid,
     diff: shouldTruncate ? diff.slice(0, DIFF_TRUNCATE_LIMIT) : diff,
   };
   if (shouldTruncate) {
-    prDiffBlock.truncated = true;
-    prDiffBlock.original_length = diff.length;
+    diffBlock.truncated = true;
+    diffBlock.original_length = diff.length;
   }
 
   const suggestions = getSuggestions({
-    domain: "pr",
+    domain: "mr",
     action: "diff",
-    id: num,
+    id: iid,
     repo: ctx,
   });
   if (shouldTruncate) {
-    const repoArg = ctx && ctx.source !== "git" ? ` -R ${ctx.nwo}` : "";
     suggestions.unshift(
-      `Run \`gh-axi${repoArg} pr diff ${num} --full\` to see the complete diff`,
+      `Run \`glab-axi mr diff ${iid} --full${repoArg(ctx)}\` to see the complete diff`,
     );
   }
 
   return renderOutput([
-    encode({ pr_diff: prDiffBlock }),
+    encode({ mr_diff: diffBlock }),
     renderHelp(suggestions),
   ]);
 }
 
-async function prCheckout(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
-  const stdout = await ghExec(["pr", "checkout", String(num)], ctx);
-  // Extract branch name from output
-  const branchMatch = stdout.match(/Switched to branch '([^']+)'/);
-  const branch = branchMatch ? branchMatch[1] : stdout.trim();
-
-  return renderOutput([
-    renderDetail("checkout", { number: num, branch, status: "ok" }, [
-      field("number"),
-      field("branch"),
-      field("status"),
-    ]),
-    renderHelp(
-      getSuggestions({ domain: "pr", action: "checkout", id: num, repo: ctx }),
-    ),
-  ]);
-}
-
-async function prReady(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
-
-  // Idempotent: check if already not a draft
-  const pr = await ghJson<Pick<PrItem, "isDraft">>(
-    ["pr", "view", String(num), "--json", "isDraft"],
-    ctx,
-  );
-  if (!pr.isDraft) {
-    return renderOutput([
-      renderDetail(
-        "pull_request",
-        { number: num, draft: "no", already: true },
-        [field("number"), field("draft"), field("already")],
-      ),
-      renderHelp(
-        getSuggestions({ domain: "pr", action: "ready", id: num, repo: ctx }),
-      ),
-    ]);
-  }
-
-  await ghExec(["pr", "ready", String(num)], ctx);
-  return renderOutput([
-    renderDetail("ready", { number: num, status: "ok" }, [
-      field("number"),
-      field("status"),
-    ]),
-    renderHelp(
-      getSuggestions({ domain: "pr", action: "ready", id: num, repo: ctx }),
-    ),
-  ]);
-}
-
-async function prReopen(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
-
-  // Idempotent: check current state
-  const pr = await ghJson<Pick<PrItem, "state">>(
-    ["pr", "view", String(num), "--json", "state"],
-    ctx,
-  );
-  const state = (pr.state ?? "").toUpperCase();
-  if (state === "OPEN") {
-    return renderOutput([
-      renderDetail(
-        "pull_request",
-        { number: num, state: "open", already: true },
-        [field("number"), field("state"), field("already")],
-      ),
-      renderHelp(
-        getSuggestions({ domain: "pr", action: "reopen", id: num, repo: ctx }),
-      ),
-    ]);
-  }
-
-  await ghExec(["pr", "reopen", String(num)], ctx);
-  return renderOutput([
-    renderDetail("reopened", { number: num, status: "ok" }, [
-      field("number"),
-      field("status"),
-    ]),
-    renderHelp(
-      getSuggestions({ domain: "pr", action: "reopen", id: num, repo: ctx }),
-    ),
-  ]);
-}
-
-async function prComment(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
-  const body = takeBody(args, { required: true });
-
-  await ghExec(["pr", "comment", String(num), "--body", body], ctx);
-  return renderOutput([
-    renderDetail("commented", { number: num, status: "ok" }, [
-      field("number"),
-      field("status"),
-    ]),
-    renderHelp(
-      getSuggestions({ domain: "pr", action: "comment", id: num, repo: ctx }),
-    ),
-  ]);
-}
-
-async function prUpdateBranch(
-  args: string[],
-  ctx?: RepoContext,
-): Promise<string> {
-  const num = takeNumber(args, "PR");
-  await ghExec(["pr", "update-branch", String(num)], ctx);
-  return renderOutput([
-    renderDetail("updated", { number: num, status: "ok" }, [
-      field("number"),
-      field("status"),
-    ]),
-    renderHelp(
-      getSuggestions({
-        domain: "pr",
-        action: "update-branch",
-        id: num,
-        repo: ctx,
-      }),
-    ),
-  ]);
-}
-
-async function prRevert(args: string[], ctx?: RepoContext): Promise<string> {
-  const num = takeNumber(args, "PR");
-
-  // gh pr revert may not exist in all gh versions; fall back to API
-  const result = await ghRaw(["pr", "revert", String(num)], ctx);
-  if (result.exitCode === 0) {
-    // Try to extract the new PR number/URL from stdout
-    const urlMatch = result.stdout.match(/\/pull\/(\d+)/);
-    const newNum = urlMatch ? Number(urlMatch[1]) : null;
-    return renderOutput([
-      renderDetail(
-        "reverted",
-        { number: num, revert_pr: newNum, status: "ok" },
-        [field("number"), field("revert_pr"), field("status")],
-      ),
-      renderHelp(
-        getSuggestions({
-          domain: "pr",
-          action: "revert",
-          id: newNum ?? num,
-          repo: ctx,
-        }),
-      ),
-    ]);
-  }
-
-  // Fallback: use gh api to create a revert via the REST API
-  const apiResult = await ghRaw(
-    ["api", `repos/{owner}/{repo}/pulls/${num}/revert`, "--method", "POST"],
-    ctx,
-  );
-  if (apiResult.exitCode !== 0) {
-    throw new AxiError(
-      apiResult.stderr.trim().split("\n")[0] || `Failed to revert PR #${num}`,
-      "UNKNOWN",
-    );
-  }
-  let revertData: RevertResult;
-  try {
-    revertData = JSON.parse(apiResult.stdout) as RevertResult;
-  } catch {
-    revertData = {};
-  }
+async function mrCheckout(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
+  // glab writes the branch name to stderr through git, so read it from the API.
+  const mr = await fetchMr(iid, ctx);
+  await glabExec(["mr", "checkout", String(iid)], ctx);
 
   return renderOutput([
     renderDetail(
-      "reverted",
-      {
-        number: num,
-        revert_pr: revertData.number ?? null,
-        url: revertData.html_url ?? null,
-        status: "ok",
-      },
-      [field("number"), field("revert_pr"), field("url"), field("status")],
+      "checkout",
+      { iid, branch: mr.source_branch ?? "", status: "ok" },
+      [field("iid"), field("branch"), field("status")],
     ),
     renderHelp(
-      getSuggestions({
-        domain: "pr",
-        action: "revert",
-        id: revertData.number ?? num,
-        repo: ctx,
-      }),
+      getSuggestions({ domain: "mr", action: "checkout", id: iid, repo: ctx }),
+    ),
+  ]);
+}
+
+async function mrComment(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
+  const body = takeBody(args, { required: true });
+
+  await postNote(iid, body, ctx);
+  return renderOutput([
+    renderDetail("commented", { iid, status: "ok" }, [
+      field("iid"),
+      field("status"),
+    ]),
+    renderHelp(
+      getSuggestions({ domain: "mr", action: "comment", id: iid, repo: ctx }),
+    ),
+  ]);
+}
+
+async function mrRebase(args: string[], ctx?: RepoContext): Promise<string> {
+  const iid = takeNumber(args, "MR");
+  const skipCi = takeBoolFlag(args, "--skip-ci");
+
+  const glabArgs = ["mr", "rebase", String(iid)];
+  if (skipCi) glabArgs.push("--skip-ci");
+  await glabExec(glabArgs, ctx);
+
+  return renderOutput([
+    renderDetail("rebased", { iid, status: "ok" }, [
+      field("iid"),
+      field("status"),
+    ]),
+    renderHelp(
+      getSuggestions({ domain: "mr", action: "rebase", id: iid, repo: ctx }),
     ),
   ]);
 }
@@ -1030,72 +886,44 @@ async function prRevert(args: string[], ctx?: RepoContext): Promise<string> {
 // Router
 // ---------------------------------------------------------------------------
 
-export async function prCommand(
+const HANDLERS: Record<
+  string,
+  (args: string[], ctx?: RepoContext) => Promise<string>
+> = {
+  list: mrList,
+  view: mrView,
+  create: mrCreate,
+  edit: mrEdit,
+  close: mrClose,
+  merge: mrMerge,
+  review: mrReview,
+  checks: mrChecks,
+  diff: mrDiff,
+  checkout: mrCheckout,
+  ready: mrReady,
+  reopen: mrReopen,
+  comment: mrComment,
+  rebase: mrRebase,
+};
+
+export async function mrCommand(
   args: string[],
   ctx?: RepoContext,
 ): Promise<string> {
   const sub = args[0];
   const rest = args.slice(1);
 
-  switch (sub) {
-    case "list":
-      rejectUnknownFlags(rest, PR_FLAGS.list, "pr", "list");
-      return prList(rest, ctx);
-    case "view":
-      rejectUnknownFlags(rest, PR_FLAGS.view, "pr", "view");
-      return prView(rest, ctx);
-    case "create":
-      rejectUnknownFlags(rest, PR_FLAGS.create, "pr", "create");
-      return prCreate(rest, ctx);
-    case "edit":
-      rejectUnknownFlags(rest, PR_FLAGS.edit, "pr", "edit");
-      return prEdit(rest, ctx);
-    case "close":
-      rejectUnknownFlags(rest, PR_FLAGS.close, "pr", "close");
-      return prClose(rest, ctx);
-    case "merge":
-      rejectUnknownFlags(rest, PR_FLAGS.merge, "pr", "merge");
-      return prMerge(rest, ctx);
-    case "review":
-      rejectUnknownFlags(rest, PR_FLAGS.review, "pr", "review");
-      return prReview(rest, ctx);
-    case "checks":
-      rejectUnknownFlags(rest, PR_FLAGS.checks, "pr", "checks");
-      return prChecks(rest, ctx);
-    case "diff":
-      rejectUnknownFlags(rest, PR_FLAGS.diff, "pr", "diff");
-      return prDiff(rest, ctx);
-    case "checkout":
-      rejectUnknownFlags(rest, PR_FLAGS.checkout, "pr", "checkout");
-      return prCheckout(rest, ctx);
-    case "ready":
-      rejectUnknownFlags(rest, PR_FLAGS.ready, "pr", "ready");
-      return prReady(rest, ctx);
-    case "reopen":
-      rejectUnknownFlags(rest, PR_FLAGS.reopen, "pr", "reopen");
-      return prReopen(rest, ctx);
-    case "comment":
-      rejectUnknownFlags(rest, PR_FLAGS.comment, "pr", "comment");
-      return prComment(rest, ctx);
-    case "update-branch":
-      rejectUnknownFlags(
-        rest,
-        PR_FLAGS["update-branch"],
-        "pr",
-        "update-branch",
-      );
-      return prUpdateBranch(rest, ctx);
-    case "revert":
-      rejectUnknownFlags(rest, PR_FLAGS.revert, "pr", "revert");
-      return prRevert(rest, ctx);
-    case "--help":
-    case "-h":
-    case "help":
-    case undefined:
-      return PR_HELP;
-    default:
-      return renderError(`Unknown pr subcommand: ${sub}`, "VALIDATION_ERROR", [
-        "Run `gh-axi pr --help` to see available subcommands",
-      ]);
+  if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
+    return MR_HELP;
   }
+
+  const handler = HANDLERS[sub];
+  if (!handler) {
+    return renderError(`Unknown mr subcommand: ${sub}`, "VALIDATION_ERROR", [
+      "Run `glab-axi mr --help` to see available subcommands",
+    ]);
+  }
+
+  rejectUnknownFlags(rest, MR_FLAGS[sub], "mr", sub);
+  return handler(rest, ctx);
 }

@@ -22,6 +22,7 @@ import {
   parseRepoContextArgs,
   TOP_HELP,
 } from "../src/cli.js";
+import { MR_HELP } from "../src/commands/mr.js";
 import { resolveRepo } from "../src/context.js";
 import { AxiError, StackError } from "../src/errors.js";
 import { encode } from "@toon-format/toon";
@@ -155,12 +156,19 @@ describe("main CLI", () => {
     const options = await cliOptions();
     const ctx = { fullPath: "group/project", source: "git" };
 
-    for (const command of COMMAND_NAMES) {
+    for (const command of COMMAND_NAMES.filter((name) => name !== "mr")) {
       await expect(options.commands[command](["list"], ctx)).rejects.toThrow(
         "not ported yet",
       );
     }
     await expect(options.home([], ctx)).rejects.toThrow("not ported yet");
+  });
+
+  it("routes mr to the ported command and exposes its help", async () => {
+    const options = await cliOptions();
+
+    expect(await options.commands.mr(["--help"])).toBe(MR_HELP);
+    expect(options.getCommandHelp("mr")).toBe(MR_HELP);
   });
 
   it("keeps stack commands cwd-bound", async () => {

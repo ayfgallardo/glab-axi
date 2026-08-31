@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { execFile, execFileSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main, TOP_HELP } from "../src/cli.js";
@@ -11,6 +13,12 @@ vi.mock("node:child_process", () => ({
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
 ) as { version: string };
+
+type ExecFileCallback = (
+  error: Error | null,
+  stdout: string,
+  stderr: string,
+) => void;
 
 const mockedExecFile = vi.mocked(execFile);
 const mockedExecFileSync = vi.mocked(execFileSync);
@@ -81,5 +89,43 @@ describe("CLI entrypoint", () => {
 
     expect(output.read()).toContain("not ported yet");
     expect(mockedExecFile).not.toHaveBeenCalled();
+  });
+
+  it("posts mr comment --body-file contents through the real runtime", async () => {
+    const body = "review\n```ts\nconst ok = true;\n```\nIt's ready.";
+    const dir = mkdtempSync(join(tmpdir(), "glab-axi-entrypoint-"));
+    const file = join(dir, "body.md");
+    writeFileSync(file, body, "utf8");
+
+    try {
+      mockedExecFileSync.mockReturnValue("git@gitlab.com:group/project.git\n");
+      mockedExecFile.mockImplementation((_cmd, _args, _opts, callback) => {
+        (callback as ExecFileCallback)(null, '{"id":1}', "");
+        return {} as ReturnType<typeof execFile>;
+      });
+      const output = createStdout();
+
+      await main({
+        argv: ["mr", "comment", "123", "--body-file", file],
+        stdout: output.stdout,
+      });
+
+      expect(mockedExecFile).toHaveBeenCalledWith(
+        "glab",
+        [
+          "api",
+          "projects/group%2Fproject/merge_requests/123/notes",
+          "--method",
+          "POST",
+          "--raw-field",
+          `body=${body}`,
+        ],
+        expect.any(Object),
+        expect.any(Function),
+      );
+      expect(output.read()).toContain("commented");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

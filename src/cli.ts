@@ -5,6 +5,7 @@ import { resolveHost, type HostContext } from "./host.js";
 import { VERSION } from "./version.js";
 import { withSuggestionHost } from "./suggestions.js";
 import { AxiError, exitCodeForError, StackError } from "./errors.js";
+import { mrCommand, MR_HELP } from "./commands/mr.js";
 
 export const DESCRIPTION =
   "Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.";
@@ -47,7 +48,9 @@ examples:
   glab-axi setup hooks
 `;
 
-const COMMAND_HELP: Record<string, string> = {};
+const COMMAND_HELP: Record<string, string> = {
+  mr: MR_HELP,
+};
 
 type HostOnlyContext = { host: HostContext };
 type CliContext = RepoContext | HostOnlyContext;
@@ -61,7 +64,7 @@ const notPorted = async (): Promise<string> => {
 
 const COMMANDS: Record<string, WrappedCommandFn> = {
   issue: withRepoContext(notPorted),
-  mr: withRepoContext(notPorted),
+  mr: withRepoContext(mrCommand),
   ci: withRepoContext(notPorted),
   schedule: withRepoContext(notPorted),
   snippet: withRepoContext(notPorted),
