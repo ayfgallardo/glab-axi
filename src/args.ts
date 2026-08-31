@@ -162,8 +162,8 @@ export function rejectUnknownFlags(
   if (unknown.length === 0) return;
   const list = unknown.join(", ");
   throw new AxiError(
-    `unknown flag${unknown.length > 1 ? "s" : ""} for gh-axi ${command} ${sub}: ${list}`,
+    `unknown flag${unknown.length > 1 ? "s" : ""} for glab-axi ${command} ${sub}: ${list}`,
     "VALIDATION_ERROR",
-    [`gh-axi ${command} ${sub} [flags]`, `gh-axi ${command} ${sub} --help`],
+    [`glab-axi ${command} ${sub} [flags]`, `glab-axi ${command} ${sub} --help`],
   );
 }

@@ -339,9 +339,9 @@ describe("requireNumber", () => {
         const err = e as AxiError;
         expect(err.code).toBe("VALIDATION_ERROR");
         expect(err.message).toContain("--bogus");
-        expect(err.message).toContain("gh-axi issue list");
+        expect(err.message).toContain("glab-axi issue list");
         expect(err.suggestions.join("\n")).toContain(
-          "gh-axi issue list --help",
+          "glab-axi issue list --help",
         );
       }
     });
