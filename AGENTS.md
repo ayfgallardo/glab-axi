@@ -24,7 +24,7 @@ Command modules talk to glab through `src/glab.ts` only: `glabJson`, `glabExec`,
 
 `RepoContext` is `{ fullPath, source, host? }`. GitLab namespaces nest, so there is no owner/name pair and no `nwo`: `group/subgroup/project` is one `fullPath`. `buildArgs` appends **`-R <fullPath>`** (not `--repo`) when `source !== "git"`, letting glab auto-detect the git remote otherwise.
 
-`glab api` accepts no `-R` at all. The project travels inside the path as the URL-encoded `:id`, and glab only resolves that placeholder from the current checkout — so `glabApiJson` substitutes it itself from the context (`encodedProjectId` in `context.ts`) and never appends `-R`. Its `fields` are split by JS type: strings go to `--raw-field`, booleans and numbers to `--field`, because glab's `--field` does magic type conversion that would turn a title of `"42"` into an integer.
+`glabApiJson` never appends `-R` (glab 1.97 does accept `-R` on `glab api` and resolves it against `:id`, but `glab api` has no other way to pass a project, so relying on it would leave every other flag ordering untested). The project travels inside the path as the URL-encoded `:id` instead, substituted by `glabApiJson` itself from the context (`encodedProjectId` in `context.ts`). Its `fields` are split by JS type: strings go to `--raw-field`, booleans and numbers to `--field`, because glab's `--field` does magic type conversion that would turn a title of `"42"` into an integer.
 
 GitLab speaks `iid` (per-project visible number) for issues and MRs. The global `id` must never surface in the UX.
 
@@ -46,12 +46,9 @@ CI uses `pnpm install --frozen-lockfile`, which parses the YAML structurally and
 Since `axi-sdk-js@0.1.8` ships `update` as a `RESERVED_COMMANDS` built-in, `glab-axi` inherits `glab-axi update` for free, and the SDK auto-resolves the npm package name (`glab-axi`) by walking up to the nearest `package.json`.
 The SDK also appends a `"built-in":` section to the top-level `--help` output at runtime, so `src/cli.ts`'s `TOP_HELP` constant is a prefix of the rendered help rather than the whole thing.
 
-## Release process
+## Releases
 
-Releases are cut by release-please from conventional commit messages on `main`; merging the bot's release PR triggers `npm publish` via `.github/workflows/release-please.yml`.
-Do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json` (a guard workflow blocks PRs that touch them), and regenerate `skills/glab-axi/SKILL.md` with `pnpm run build:skill` instead of editing it directly.
-
-Every `pull_request` workflow (`ci.yml`, `guard-generated-files.yml`, `no-mistakes-required.yml`) uses `paths-ignore` for the release-please output set (`.release-please-manifest.json`, `CHANGELOG.md`, `package.json`) so release PRs create zero runs. Job-level bot `if`s stay as defense in depth. `test/release-ci-exclusions.test.ts` derives that set from `release-please-config.json` and fails if a workflow drifts; update the ignore lists when adding `extra-files` or changing `release-type`.
+No release automation: releases are plain git tags (`git tag vX.Y.Z`), not published to npm. `.github/workflows/ci.yml` runs lint, test, and build on every push and PR.
 
 ## Installable skill (`src/skill.ts` → `skills/glab-axi/SKILL.md`)
 
@@ -184,13 +181,6 @@ All three follow the `mr.ts` split: reads through `glabApiJson` against `project
 ## Home dashboard (`src/commands/home.ts`)
 
 The bare `glab-axi` invocation. Unlike every scoped command family it needs no `RepoContext` at all: `GET /user`, `GET /merge_requests?scope=assigned_to_me&state=opened`, `GET /issues?scope=assigned_to_me&state=opened` and `GET /todos` are all account-scoped, not project-scoped, so it never forwards `ctx` to `glabApiJson` — same reasoning as the "User-scoped commands" pattern above, though the earlier explanation (avoiding an injected `-R`) does not even apply here, since none of these paths contain `:id`. The four calls run in `Promise.all`, each independently `.catch()`-guarded to `undefined`/`[]` so one failing endpoint (e.g. missing scope) still renders the rest of the dashboard instead of failing it outright.
-
-## Raising PRs to upstream
-
-Human-authored PRs targeting `main` must be raised through [`no-mistakes`](https://github.com/kunchenguid/no-mistakes) (`no-mistakes init --fork-url git@github.com:<you>/gh-axi.git`, then `git push no-mistakes`): the `Require no-mistakes` workflow fails any PR whose body lacks the pipeline's deterministic signature, and maintainer triage treats hand-raised PRs as blocked. Do not push a PR branch straight to `origin`. See CONTRIBUTING.md.
-
-`.github/workflows/no-mistakes-required.yml` is a thin caller of the shared `kunchenguid/no-mistakes/.github/actions/require-no-mistakes` composite action, pinned to an immutable commit SHA and never `@main` (main is editable by the very PR the gate judges). Enforcement logic - the `Updates from [git push no-mistakes]` signature check, the `<!-- no-mistakes-pipeline-attestation:v1 {...} -->` parse, and the head binding - and its tests live upstream in the no-mistakes repository; change enforcement there rather than copying it locally, and bump this repository's pin in a deliberate separate pull request. This repository still owns its `on:`, `paths-ignore`, `concurrency`, `permissions`, job name, and author-exemption `if:`.
-The shared action's head binding means a PR whose body no-mistakes did not rewrite for the current head goes red. That is the attestation contract, not a flake: push through `git push no-mistakes` so the body is refreshed.
 
 ## Maintaining this file
 
