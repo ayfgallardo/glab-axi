@@ -8,10 +8,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 This repository is a port of gh-axi 0.1.35 (a `gh` wrapper) to `glab`. The core layer is ported; the command families are not yet.
 
-Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `bin/glab-axi.ts`.
-Not yet ported: everything under `src/commands/` plus `src/totals.ts`, `src/gistSelector.ts` and the gh content of `src/suggestions.ts`. `cli.ts` imports none of them — every command family routes to an inline stub that throws `not ported yet`.
+Ported and authoritative: `src/glab.ts`, `src/context.ts`, `src/errors.ts`, `src/host.ts`, `src/cli.ts`, `src/version.ts`, `src/args.ts`, `bin/glab-axi.ts`, `src/commands/mr.ts`, and the `mr` entries of `src/suggestions.ts`.
+Not yet ported: the rest of `src/commands/` plus `src/totals.ts`, `src/gistSelector.ts` and the other domains of `src/suggestions.ts`. Every unported command family routes to an inline stub in `cli.ts` that throws `not ported yet`.
 
-The unported gh modules are held out of the graph so build and test stay green: `tsconfig.json` excludes `src/commands` and `src/totals.ts`, and `vitest.config.ts` carries a commented `NOT_PORTED_YET` list naming the lot that reclaims each suite. **Each port lot removes its own entry from both lists** — `describe.skip` is not an option, because a suite whose import fails errors before the skip is evaluated.
+The unported gh modules are held out of the graph so build and test stay green: `tsconfig.json` excludes them file by file (alongside `src/totals.ts`), and `vitest.config.ts` carries a commented `NOT_PORTED_YET` list naming the lot that reclaims each suite. **Each port lot removes its own entry from both lists** — `describe.skip` is not an option, because a suite whose import fails errors before the skip is evaluated.
 
 Sections below tagged **[gh-era]** describe the unported modules and still say `gh`, `ghJson`, `nwo`, `GH_HOST`. Treat them as a description of the source material to port, never as a description of current behavior.
 
@@ -100,12 +100,10 @@ Requires the `project` (or `read:project`) OAuth scope on the `gh` token; `src/e
 
 ## Repeatable flags (`src/args.ts`)
 
-**[gh-era]** Source material for a later port lot, not current behavior.
-
-`gh` accepts `--label`, `--assignee`, `--reviewer`, `--project`, and the `--add-*`/`--remove-*` variants once per value, so gh-axi must collect _every_ occurrence.
+`glab` accepts `--label`, `--assignee`, `--reviewer`, and the `--add-*`/`--remove-*` variants once per value, so glab-axi must collect _every_ occurrence.
 Use `getAllFlags`/`takeAllFlags` plus `pushRepeated`; `getFlag`/`takeFlag` keep only the first occurrence and silently discard the rest, which is the bug that recurred as #55, #57, and #75.
 Both collectors reject a dangling (`--label` with nothing after it) or blank (`--label=`) value with a `VALIDATION_ERROR` instead of dropping it.
-Pick the collector that matches the surrounding file: `issue.ts` reads args non-destructively (`getAllFlags`), `pr.ts` consumes them (`takeAllFlags`).
+Pick the collector that matches the surrounding file: `mr.ts` consumes them (`takeAllFlags`).
 When a flag becomes repeatable, mark it `(repeatable)` in that command's `*_HELP` string.
 
 ## `--version` fast path (`bin/glab-axi.ts`, `src/version.ts`)
@@ -122,6 +120,24 @@ This only works because `src/version.ts` is a LEAF module importing node builtin
 Stack commands are cwd-bound. `cli.ts#withLocalRepoContext` rejects explicit repo flags and `GH_REPO`, strips the supported host flag, and never passes a `RepoContext` to `ghRaw`, because the extension does not accept `--repo`.
 Successful extension status is commonly written to stderr, and exits 2-10 represent actionable stack state. Preserve both streams and the exact `StackError.exitCode`, which reaches the shell only through `cli.ts`'s `formatError` hook; do not replace `ghRaw` with `ghExec` or generic `mapGhError`.
 Never expose an interactive path. Force `view --json`, `submit --auto`, and `merge --yes`; require arguments for commands that otherwise prompt. Keep `modify`, `switch`, `alias`, and `feedback` out unless upstream gains a useful headless interface.
+
+## Merge requests (`src/commands/mr.ts`)
+
+Reads go through `glabApiJson` against the REST API and are shaped locally before TOON; mutations go through the `glab mr` subcommand that owns the flow (`create`, `close`, `reopen`, `merge`, `update`, `rebase`, `checkout`, `approve`, `revoke`, `diff --raw`). Comments are the exception: they are posted with `POST …/merge_requests/:iid/notes`, because `glab mr note create` is still marked EXPERIMENTAL.
+
+Every glab mutation is forced non-interactive. `create` always passes `--description` (empty when no body) and `--yes`, since `--yes` only skips the final submission prompt and an absent description opens an editor; `update` and `merge` also pass `--yes`.
+
+Deliberate divergences from gh-axi's `pr`, all GitLab vocabulary rather than GitHub's:
+
+- `--base`/`--head` are `--target-branch`/`--source-branch`; `--delete-branch` is `--remove-source-branch`; `pr update-branch` is `mr rebase`; `pr review --request-changes` is `mr review --revoke` (GitLab has no changes-requested verdict, only approve/unapprove).
+- `pr revert` has no GitLab counterpart at MR level and is dropped.
+- Every rendered number is the `iid`, and the column is named `iid`, never `number`.
+- `--body`/`--body-file` are kept as the body channel (shared `takeBody`) even though GitLab calls the field `description`.
+- `mr list` reports no `of N total`: the true total lives in the `X-Total` response header, and `glab api --include` would break JSON parsing. `src/totals.ts` stays unported.
+
+`mr edit` maps onto `glab mr update`, which _replaces_ assignees and reviewers unless each name is prefixed: `--add-*` becomes `+name` and `--remove-*` becomes `!name` (`!`, not `-`, so the value is never parsed as a flag).
+
+`mr checks` is pipeline jobs, not GitHub checks: the head pipeline comes from the MR payload's `head_pipeline`, then `GET /projects/:id/pipelines/:pipeline_id/jobs`. A failed job prepends a `glab-axi ci view <pipeline>` suggestion. `mr view --reviews` reads `…/approvals` (whose `approvals_required`/`approvals_left` are Premium-only and must render as `null` on Free) plus the `…/discussions` entries whose first note carries a `position`, which are the diff-anchored review threads.
 
 ## Raising PRs to upstream
 
