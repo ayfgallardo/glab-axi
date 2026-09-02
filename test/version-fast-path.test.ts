@@ -32,6 +32,9 @@ function runBin(args: string[]): Run {
         env: {
           ...process.env,
           GLAB_AXI_MODULE_TRACE_FILE: traceFile,
+          // Keep the recorder enabled — it is what these traces probe — but
+          // point it at a throwaway home so it cannot touch the real gain log.
+          HOME: dir,
         },
       },
     );
@@ -75,6 +78,7 @@ describe("--version fast path", () => {
       modules.filter((url) => url.endsWith("/dist/src/suggestions.js")),
     ).toEqual([]);
     expect(modules.filter((url) => url.includes("@toon-format"))).toEqual([]);
+    expect(modules.filter((url) => url.includes("gpt-tokenizer"))).toEqual([]);
   });
 
   it("negative control: a real command path does load the heavy command graph", () => {
@@ -86,5 +90,13 @@ describe("--version fast path", () => {
       modules.some((url) => url.endsWith("/dist/src/suggestions.js")),
     ).toBe(true);
     expect(modules.some((url) => url.includes("@toon-format"))).toBe(true);
+  });
+
+  it("never loads the tokenizer before stdout is written", () => {
+    // gpt-tokenizer carries large BPE tables; it must stay a dynamic import
+    // reached only in flushGain, after the rendered output is out.
+    const { modules } = runBin(["--help"]);
+
+    expect(modules.filter((url) => url.includes("gpt-tokenizer"))).toEqual([]);
   });
 });

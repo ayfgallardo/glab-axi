@@ -52,6 +52,17 @@ async function cliOptions() {
 describe("main CLI", () => {
   const originalArgv = [...process.argv];
 
+  /**
+   * The stdout handed to the SDK is the gain tee, not the caller's object, so
+   * identity no longer holds — assert the tee forwards to it instead.
+   */
+  function expectStdoutTees(stdout: { write: ReturnType<typeof vi.fn> }): void {
+    const passed = vi.mocked(runAxiCli).mock.calls[0]?.[0]
+      ?.stdout as unknown as { write: (chunk: string) => unknown };
+    passed.write("teed\n");
+    expect(stdout.write).toHaveBeenCalledWith("teed\n");
+  }
+
   beforeEach(() => {
     vi.resetAllMocks();
     process.argv = [...originalArgv];
@@ -91,6 +102,7 @@ describe("main CLI", () => {
       "stack",
       "api",
       "setup",
+      "gain",
     ]);
   });
 
@@ -117,7 +129,7 @@ describe("main CLI", () => {
   });
 
   it("lists the command surface and dashboard in the top-level help", () => {
-    expect(TOP_HELP).toContain("commands[14]:");
+    expect(TOP_HELP).toContain("commands[15]:");
     expect(TOP_HELP).toContain("(none)=dashboard");
     for (const command of COMMAND_NAMES) {
       expect(TOP_HELP).toContain(command);
@@ -131,9 +143,8 @@ describe("main CLI", () => {
 
     await main({ argv, stdout });
 
-    expect(runAxiCli).toHaveBeenCalledWith(
-      expect.objectContaining({ argv, stdout }),
-    );
+    expect(runAxiCli).toHaveBeenCalledWith(expect.objectContaining({ argv }));
+    expectStdoutTees(stdout);
   });
 
   it.each(["-v", "-V", "--version"])(
@@ -144,9 +155,8 @@ describe("main CLI", () => {
 
       await main({ argv, stdout });
 
-      expect(runAxiCli).toHaveBeenCalledWith(
-        expect.objectContaining({ argv, stdout }),
-      );
+      expect(runAxiCli).toHaveBeenCalledWith(expect.objectContaining({ argv }));
+      expectStdoutTees(stdout);
     },
   );
 

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { encodedProjectId, type RepoContext } from "./context.js";
 import { AxiError, glabNotInstalledError, mapGlabError } from "./errors.js";
+import { recordRawBody } from "./gain.js";
 
 export interface ExecResult {
   stdout: string;
@@ -34,7 +35,23 @@ function execOptions(ctx?: RepoContext) {
   };
 }
 
+/**
+ * `glab api` is the only invocation whose stdout is a GitLab API response body;
+ * every other subcommand emits glab's own rendering. Recording here — the one
+ * callback both `run` and `runWithStdin` resolve through — counts each response
+ * exactly once, `--paginate` included (glab concatenates the pages into a
+ * single stdout). A failed call answers on stderr instead, and stays counted:
+ * this module has no retry or auth-fallback path, so an error body is always
+ * one an agent would have read.
+ */
+function recordApiBody(args: string[], result: ExecResult): void {
+  if (args[0] === "api") {
+    recordRawBody(result.stdout || result.stderr);
+  }
+}
+
 function toExecResult(
+  args: string[],
   resolve: (result: ExecResult) => void,
 ): (error: Error | null, stdout: string, stderr: string) => void {
   return (error, stdout, stderr) => {
@@ -45,11 +62,13 @@ function toExecResult(
     const exitCode = error
       ? ((error as Error & { code?: string | number }).code ?? 1)
       : 0;
-    resolve({
+    const result: ExecResult = {
       stdout: stdout ?? "",
       stderr: stderr ?? "",
       exitCode: typeof exitCode === "number" ? exitCode : 1,
-    });
+    };
+    recordApiBody(args, result);
+    resolve(result);
   };
 }
 
@@ -59,7 +78,7 @@ function run(args: string[], ctx?: RepoContext): Promise<ExecResult> {
       "glab",
       args,
       execOptions(ctx),
-      toExecResult(resolve),
+      toExecResult(args, resolve),
     );
     // Close the child's stdin immediately: this call path never has input to
     // send, and execFile otherwise leaves stdin open. If glab ever prompts
@@ -83,7 +102,7 @@ function runWithStdin(
       "glab",
       args,
       execOptions(ctx),
-      toExecResult(resolve),
+      toExecResult(args, resolve),
     );
     child.stdin?.end(input);
   });

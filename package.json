@@ -42,14 +42,14 @@
   },
   "dependencies": {
     "@toon-format/toon": "^2.1.0",
-    "axi-sdk-js": "^0.1.10"
+    "axi-sdk-js": "^0.1.10",
+    "gpt-tokenizer": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
     "eslint": "^10.1.0",
     "globals": "^17.4.0",
-    "gpt-tokenizer": "^4.0.0",
     "prettier": "^3.8.1",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0",
