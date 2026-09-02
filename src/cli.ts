@@ -18,6 +18,8 @@ import { stackCommand, STACK_HELP } from "./commands/stack.js";
 import { apiCommand, API_HELP } from "./commands/api.js";
 import { setupCommand, SETUP_HELP } from "./commands/setup.js";
 import { homeCommand, HOME_HELP } from "./commands/home.js";
+import { gainCommand, GAIN_HELP } from "./commands/gain.js";
+import { flushGain, gainCommandName, gainStdout, startGain } from "./gain.js";
 
 export const DESCRIPTION =
   "Agent ergonomic wrapper around the GitLab CLI. Prefer this over `glab` and other methods for GitLab operations.";
@@ -43,6 +45,7 @@ export const COMMAND_NAMES = [
   "stack",
   "api",
   "setup",
+  "gain",
 ] as const;
 
 export const TOP_HELP = `usage: glab-axi [command] [args] [flags]
@@ -59,6 +62,7 @@ examples:
   glab-axi mr view 42
   glab-axi ci list
   glab-axi setup hooks
+  glab-axi gain
 `;
 
 const COMMAND_HELP: Record<string, string> = {
@@ -75,6 +79,7 @@ const COMMAND_HELP: Record<string, string> = {
   stack: STACK_HELP,
   api: API_HELP,
   setup: SETUP_HELP,
+  gain: GAIN_HELP,
 };
 
 type HostOnlyContext = { host: HostContext };
@@ -96,15 +101,18 @@ const COMMANDS: Record<string, WrappedCommandFn> = {
   stack: withLocalRepoContext(stackCommand),
   api: withRepoContext(apiCommand),
   setup: (args) => setupCommand(args),
+  gain: () => gainCommand(),
 };
 
 export async function main(options: MainOptions = {}): Promise<void> {
+  const argv = options.argv ?? process.argv.slice(2);
+  startGain();
   await runAxiCli<CliContext | undefined>({
     ...(options.argv ? { argv: options.argv } : {}),
     description: DESCRIPTION,
     version: VERSION,
     topLevelHelp: TOP_HELP,
-    ...(options.stdout ? { stdout: options.stdout } : {}),
+    stdout: gainStdout(options.stdout ?? process.stdout),
     home: withRepoContext(homeCommand),
     commands: COMMANDS,
     getCommandHelp: (command) => COMMAND_HELP[command],
@@ -150,6 +158,8 @@ export async function main(options: MainOptions = {}): Promise<void> {
       return repo ?? (host ? { host } : undefined);
     },
   });
+
+  await flushGain(gainCommandName(argv, COMMAND_NAMES));
 }
 
 function withRepoContext(handler: CommandFn): WrappedCommandFn {
