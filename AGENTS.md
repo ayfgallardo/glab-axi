@@ -190,6 +190,45 @@ The bare `glab-axi` invocation. Unlike every scoped command family it needs no `
 
 `homeCommand` is also registered in `cli.ts`'s `COMMANDS` under the explicit `"home"` key (not just as the SDK's `options.home` bare-invocation handler) — the SDK (`axi-sdk-js`'s `runAxiCli`) only special-cases an _empty_ argv into `options.home`; a literal `glab-axi home` is looked up in `options.commands` like any other named command and answered `Unknown command` if absent. Routing it explicitly renders the same dashboard, just without the SDK's home-view header merge (`isHomeView` is only true for the bare form).
 
+## Token-savings recorder (`src/gain.ts`, `src/commands/gain.ts`)
+
+Per-invocation measurement of what this CLI saves an agent:
+`saving = tokens(raw GitLab API bodies) − tokens(rendered stdout)`. One JSONL line per
+invocation in the platform data dir (`~/Library/Application Support/axi/glab-axi.jsonl`,
+XDG elsewhere), read back by `glab-axi gain`.
+
+The recorder is a **per-repo copy** of the one in `sonarqube-axi` (Florian's decision,
+design `~/work/brain/geofoncier/docs-conception/2026-09-01-axi-gain-design.md`): no shared
+package, no new cross-module dependency. A fix found here must be carried by hand to the
+other AXI modules.
+
+Three things that do not survive a careless edit:
+
+- **The counting point is `recordApiBody` in `src/glab.ts`**, called from the single
+  `toExecResult` callback both `run` and `runWithStdin` resolve through, and gated on
+  `args[0] === "api"`. That covers `runApi` (`glabApiJson`/`glabApiText`), `glabApiJsonBody`
+  and `api.ts`'s passthrough, exactly once per response, `--paginate` included (glab
+  concatenates pages into one stdout). Subcommand invocations (`glab mr create`, …) are
+  deliberately _not_ counted: their stdout is glab's own rendering, not an HTTP body.
+  A failed API call answers on stderr and stays counted — this module has **no** retry or
+  auth-fallback path, so there is no `dropRetriedRawBody` equivalent to port.
+- **`gpt-tokenizer` is a dynamic import inside `flushGain`, after stdout is written.** It
+  loads large BPE tables; importing it at module scope would delay every rendered output
+  and defeat the `--version` fast path. `test/version-fast-path.test.ts` asserts the module
+  never appears in a `--help` trace.
+- **Nothing here may fail a command.** `flushGain` is one silent `try/catch`; the
+  unwritable-log test in `test/gain.test.ts` stubs `process.platform` (restored in a
+  `finally`) so both the macOS and the XDG branch are exercised on either runner, and it
+  was verified to fail when the `try/catch` is removed.
+
+Privacy is a hard constraint: the line carries integers plus a sub-command name resolved by
+`gainCommandName` against `COMMAND_NAMES`. An argv whose first token is not in that list
+writes no line at all. `AXI_GAIN=0` disables recording, the tokenizer import included.
+
+`sinceIso` reduces over the entries instead of `Math.min(...entries.map(…))`: the log is
+append-only and unbounded, and spreading a few hundred thousand arguments throws a
+`RangeError`.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

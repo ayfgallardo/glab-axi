@@ -50,6 +50,35 @@ Run `glab-axi --help` for the full command list and `glab-axi <command> --help` 
 | `stack`    | Thin adapter over stacked-diff style workflows.                                    |
 | `api`      | Call the GitLab REST API directly, with the same AXI conventions.                  |
 | `setup`    | Install shell hooks and other one-time setup steps.                                |
+| `gain`     | Report the tokens this CLI has saved, cumulated and per sub-command.               |
+
+## Token savings (`glab-axi gain`)
+
+Every invocation that calls the GitLab API appends one JSONL line to
+`~/Library/Application Support/axi/glab-axi.jsonl` (XDG equivalent elsewhere):
+
+```json
+{
+  "ts": 1788280000,
+  "cli": "glab-axi",
+  "cmd": "mr",
+  "raw": 8421,
+  "out": 2510,
+  "ms": 412
+}
+```
+
+`raw` is the tokens of the raw API bodies an agent would have read by calling GitLab
+itself, `out` the tokens of the rendered output. `glab-axi gain` aggregates the log.
+
+The line holds integers and a sub-command name taken from `COMMAND_NAMES` — never an
+argument, a flag value, a project path, a URL or a payload fragment. `AXI_GAIN=0`
+disables recording entirely, including the tokenizer import. Recording never fails a
+command: an unwritable log leaves the output and the exit code untouched.
+
+Only `glab api` responses are counted — the sole invocations whose stdout is a GitLab
+API body. A `glab mr create` prints glab's own rendering, not an HTTP response, and is
+not counted.
 
 ## Custom hosts
 
