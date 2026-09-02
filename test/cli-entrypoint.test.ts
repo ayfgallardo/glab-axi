@@ -42,9 +42,13 @@ describe("CLI entrypoint", () => {
   beforeEach(() => {
     mockedExecFile.mockReset();
     mockedExecFileSync.mockReset();
+    // This suite drives the real main(), which records a measurement; keep it
+    // out of the developer's own gain log.
+    vi.stubEnv("AXI_GAIN", "0");
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     process.exitCode = undefined;
   });
 

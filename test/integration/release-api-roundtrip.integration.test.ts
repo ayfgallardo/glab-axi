@@ -46,6 +46,9 @@ describe("CLI release and API state round-trips", () => {
     env = {
       ...process.env,
       GLAB_AXI_FAKE_STATE: stateFile,
+      // The suite spawns the real binary; without this it would append fake
+      // measurements to the developer's own gain log.
+      AXI_GAIN: "0",
       PATH: `${dir}${delimiter}${process.env.PATH ?? ""}`,
     };
   });

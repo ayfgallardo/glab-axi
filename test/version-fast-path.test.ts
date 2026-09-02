@@ -32,6 +32,9 @@ function runBin(args: string[]): Run {
         env: {
           ...process.env,
           GLAB_AXI_MODULE_TRACE_FILE: traceFile,
+          // Keep the recorder enabled — it is what these traces probe — but
+          // point it at a throwaway home so it cannot touch the real gain log.
+          HOME: dir,
         },
       },
     );
